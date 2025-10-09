@@ -1,5 +1,5 @@
 # ============================================================
-# 📦 FamilyTreeNow Stealth Scraper — Railway Dockerfile
+# 📦 FamilyTreeNow + Nextdoor Automation — Railway Dockerfile
 # ============================================================
 
 # Use Node 20 on Debian slim base
@@ -47,25 +47,20 @@ COPY . .
 RUN npx playwright install chromium
 
 # ------------------------------------------------------------
-# 🔧 Make runner executable
-# ------------------------------------------------------------
-RUN chmod +x scripts/run_ftn.sh
-
-# ------------------------------------------------------------
 # 📁 Ensure debug folder exists at runtime
 # ------------------------------------------------------------
 RUN mkdir -p /app/ftn_debug && chmod 777 /app/ftn_debug
 ENV FTN_DEBUG_PATH=/app/ftn_debug
 
 # ------------------------------------------------------------
-# 🚀 Start command (tries xvfb-run, falls back to headless)
+# 🚀 Start command (Nextdoor Dallas automation)
 # ------------------------------------------------------------
 CMD bash -c '\
   mkdir -p /app/ftn_debug && chmod 777 /app/ftn_debug && \
   if command -v xvfb-run >/dev/null 2>&1; then \
     echo "🖥️  Starting with xvfb-run (virtual display)..."; \
-    xvfb-run -a bash scripts/run_ftn.sh; \
+    xvfb-run -a node nextdoorAutomationDallas.js; \
   else \
     echo "⚙️  xvfb not available — running headless mode."; \
-    HEADLESS=1 bash scripts/run_ftn.sh; \
+    HEADLESS=1 node nextdoorAutomationDallas.js; \
   fi'
