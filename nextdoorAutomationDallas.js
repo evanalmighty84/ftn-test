@@ -8,7 +8,6 @@ const fs = require('fs');
 const { personSearchAndScrape } = require('./melissaLookup');
 const { postLeadAlert, canonIndustry } = require('./leadAlertClient');
 const { runFamilyTreeStealth } = require('./runFamilyTreeStealth');
-const { enrichWithEnformion, enrichSmartlyWithOpenAI,inferZipFromNeighborhood } = require('./enformium_contact_enrich'); // your SDK wrapper
 
 
 
