@@ -367,33 +367,27 @@ async function attemptWithProxy(rawProxy, tryIndex) {
         // === Environment flags ===
         const useChrome = process.env.USE_CHROME === '1';
         // 🚫 Force headless in Railway or Docker — no X11
-        const headless =
-            process.env.HEADLESS === '1' ||
-            process.env.RAILWAY_ENVIRONMENT ||
-            process.env.DOCKER === '1' ||
-            process.env.CI === 'true' ||
-            true; // fallback default
+
 
         // --- Base Chromium launch options ---
+        const isRailway = !!process.env.RAILWAY_ENVIRONMENT;
+        const headless = isRailway ? false : true;
+
         const baseLaunchOpts = {
-            headless: true, // force headless (prevents X11 errors)
+            headless,
             viewport: { width: 1366, height: 768 },
-            locale: 'en-US',
-            timezoneId: 'America/Chicago',
-            userAgent: UA,
             args: [
-                '--disable-blink-features=AutomationControlled',
-                '--disable-gpu',
                 '--no-sandbox',
                 '--disable-dev-shm-usage',
                 '--disable-setuid-sandbox',
-                '--ignore-certificate-errors',
-                '--disable-extensions',
-                '--no-zygote',
+                '--disable-blink-features=AutomationControlled',
+                '--use-gl=swiftshader',
                 '--disable-software-rasterizer',
-                '--disable-features=site-per-process,TranslateUI,BlinkGenPropertyTrees',
+                '--window-size=1366,768',
             ],
         };
+
+
 
         if (proxyForPlaywright) baseLaunchOpts.proxy = proxyForPlaywright;
 
@@ -476,22 +470,57 @@ async function attemptWithProxy(rawProxy, tryIndex) {
 // Use a slightly stronger wait strategy: try networkidle first (if it completes quickly),
 // but fall back to domcontentloaded to avoid long stalls.
         try {
-
-            await page.goto(TARGET, {waitUntil: 'domcontentloaded', timeout: 30000});
+            await page.goto(TARGET, { waitUntil: 'domcontentloaded', timeout: 30000 });
         } catch (e) {
-            // networkidle may time out or not be suitable; try a quicker domcontentloaded then continue.
-            console.warn('domcontentloaded goto failed (falling back to domcontentloaded):', e && e.message ? e.message : e);
+            console.warn('domcontentloaded goto failed (falling back to domcontentloaded):', e?.message || e);
             try {
-                await page.goto(TARGET, {waitUntil: 'domcontentloaded', timeout: 30000});
+                await page.goto(TARGET, { waitUntil: 'domcontentloaded', timeout: 30000 });
             } catch (err) {
-                console.warn('domcontentloaded goto also had an error (continuing):', err && err.message ? err.message : err);
+                console.warn('domcontentloaded goto also had an error (continuing):', err?.message || err);
             }
         }
-// ---------- IMMEDIATE RID NAVIGATION SNIPPET ----------
-// place this right after page.goto(...); and after the short waitForTimeout
-// but BEFORE waiting for Turnstile iframe / reading payloads.
 
+// ---------- SMART WAIT FOR PAGE RENDER ----------
+        try {
+            await Promise.race([
+                page.waitForSelector('.panel-body', { timeout: 10000 }), // FTN results panel
+                page.waitForSelector('iframe[src*="captcha"], iframe[src*="turnstile"], div[data-sitekey]', { timeout: 10000 }) // Cloudflare challenge
+            ]);
+            console.log('✅ Results or Turnstile detected — continuing...');
+        } catch {
+            console.warn('⚠️ Neither results nor Turnstile detected within 10s — continuing anyway...');
+        }
+
+// Give the page an extra 3 seconds for FTN JS to finish rendering
+        await page.waitForTimeout(3000);
+
+// Capture partial body for debugging
+        const htmlSnippet = await page.evaluate(() => document.body.innerText.slice(0, 400));
+        console.log('🧩 BODY SNIPPET:\n', htmlSnippet);
+        // 🔍 Try to follow the "View Details" link
+        const ridLink = await page.evaluate(() => {
+            const link = document.querySelector('a[href*="/search/people/results?rid="]');
+            return link ? link.href : null;
+        });
+
+        // after we find and goto the ridLink
+        if (ridLink) {
+            console.log('➡️ Found RID link:', ridLink);
+            await page.goto(ridLink, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.waitForSelector('.panel-body', { timeout: 8000 });
+
+            // instead of manually $$eval() here, call the real parser:
+            const detail = await scrapeWirelessDetail(page);
+            console.log('📞 Wireless Detail Extracted:', JSON.stringify(detail, null, 2));
+        }
+        else {
+            console.warn('⚠️ No RID link detected.');
+        }
+
+
+// ---------- IMMEDIATE RID NAVIGATION SNIPPET ----------
         console.log('Trying immediate RID navigation (top-level + frames) and hard-stubbing window.open...');
+
 
         const forcedNav = await page.evaluate(async () => {
             try {

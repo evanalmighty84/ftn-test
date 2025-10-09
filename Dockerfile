@@ -6,7 +6,7 @@
 FROM node:20-bookworm-slim
 
 # ------------------------------------------------------------
-# 🧩 Install Chromium dependencies + bash
+# 🧩 Install Chromium dependencies + virtual display support
 # ------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash curl ca-certificates fonts-liberation wget xdg-utils \
@@ -15,9 +15,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 libpangocairo-1.0-0 \
     libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxdamage1 \
     libxext6 libxfixes3 libxkbcommon0 libxrandr2 libxshmfence1 \
+    xvfb xauth \
  && rm -rf /var/lib/apt/lists/*
 
-# Make sure playwright installs browsers into image
+# Make sure Playwright installs browsers into image
 ENV PLAYWRIGHT_BROWSERS_PATH=0
 
 # ------------------------------------------------------------
@@ -51,6 +52,20 @@ RUN npx playwright install chromium
 RUN chmod +x scripts/run_ftn.sh
 
 # ------------------------------------------------------------
-# 🚀 Default start command
+# 📁 Ensure debug folder exists at runtime
 # ------------------------------------------------------------
-CMD ["bash", "scripts/run_ftn.sh"]
+RUN mkdir -p /app/ftn_debug && chmod 777 /app/ftn_debug
+ENV FTN_DEBUG_PATH=/app/ftn_debug
+
+# ------------------------------------------------------------
+# 🚀 Start command (tries xvfb-run, falls back to headless)
+# ------------------------------------------------------------
+CMD bash -c '\
+  mkdir -p /app/ftn_debug && chmod 777 /app/ftn_debug && \
+  if command -v xvfb-run >/dev/null 2>&1; then \
+    echo "🖥️  Starting with xvfb-run (virtual display)..."; \
+    xvfb-run -a bash scripts/run_ftn.sh; \
+  else \
+    echo "⚙️  xvfb not available — running headless mode."; \
+    HEADLESS=1 bash scripts/run_ftn.sh; \
+  fi'

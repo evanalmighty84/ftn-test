@@ -2,12 +2,18 @@ node_modules
 npm-debug.log
 yarn-error.log
 pnpm-lock.yaml
+.ftn_debug
+ftn_debug
+*.log
+.cache
+.playwright
 
 
 logs
 *.log
 *.out
 *.err
+.env
 
 .DS_Store
 *.swp
