@@ -18,7 +18,7 @@ const axios = require('axios');
 const { chromium } = require('playwright');
 const { Solver } = require('@2captcha/captcha-solver');
 
-const TARGET = process.env.TARGET_URL || 'https://www.familytreenow.com/search/genealogy/results?first=Lauren&last=Stevens&citystatezip=Plano,+TX';
+let TARGET = process.env.TARGET_URL; // don't prefill at module load
 const PROXY_FILE = process.env.PROXY_FILE || './proxies.txt';
 const RAW_PROXY = process.env.PROXY_LINE || null;
 const TWO_KEY = process.env.TWOCAPTCHA_API_KEY || '';
@@ -1140,7 +1140,12 @@ async function attemptWithProxy(rawProxy, tryIndex) {
 // 🧩 Exportable Runner
 // ============================================================
 
-async function runFamilyTreeStealth({ first = 'Lauren', last = 'Stevens', city = 'Plano' } = {}) {
+async function runFamilyTreeStealth({ first = '', last = '', city = '' } = {}) {
+    // ✅ Build and apply the dynamic target FIRST, before any other logic
+    const target = `https://www.familytreenow.com/search/genealogy/results?first=${encodeURIComponent(first)}&last=${encodeURIComponent(last)}&citystatezip=${encodeURIComponent(city)},+TX`;
+    process.env.TARGET_URL = target; // override any stale Railway env var
+    console.log(`🎯 Target URL: ${target}`);
+
     await ensureLogDir();
     const lines = await loadProxyLines();
     if (!lines.length && !RAW_PROXY) {
@@ -1149,15 +1154,12 @@ async function runFamilyTreeStealth({ first = 'Lauren', last = 'Stevens', city =
     }
 
     const pool = lines.length ? lines : [RAW_PROXY];
-    const target = `https://www.familytreenow.com/search/genealogy/results?first=${encodeURIComponent(first)}&last=${encodeURIComponent(last)}&citystatezip=${encodeURIComponent(city)},+TX`;
-    process.env.TARGET_URL = target;
-
-    console.log(`🎯 Target URL: ${target}`);
 
     for (let i = 0, tries = 0; tries < MAX_TRIES && i < pool.length; i = (i + 1) % pool.length, tries++) {
         const raw = pool[i];
         console.log(`\n== Try ${tries + 1} of up to ${MAX_TRIES} using proxy index ${i} ==`);
         const res = await attemptWithProxy(raw, tries + 1);
+
         if (res.success) {
             console.log('✅ Success!', res);
 
@@ -1172,16 +1174,14 @@ async function runFamilyTreeStealth({ first = 'Lauren', last = 'Stevens', city =
                 state: res.state,
             };
 
-
             // ✅ match test script expectation
             return {
-                success: true,
+                ok: true, // unified return flag
                 reason: 'scraped_ok',
                 proxyUsed: res.proxyUsed || null,
                 data,
             };
-        }
-        else {
+        } else {
             console.warn('Proxy attempt failed:', res.reason || res.error || 'unknown', res);
         }
     }
@@ -1202,7 +1202,7 @@ if (require.main === module) {
     runFamilyTreeStealth({ first, last, city })
         .then(r => {
             console.log('Final result:', r);
-            process.exit(r.ok ? 0 : 1);
+            process.exit(r.ok ? 0 : 1); // ✅ uses unified "ok"
         })
         .catch(err => {
             console.error('Fatal error:', err);
@@ -1212,5 +1212,6 @@ if (require.main === module) {
     // Exported function mode
     module.exports = { runFamilyTreeStealth };
 }
+
 
 
