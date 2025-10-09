@@ -186,49 +186,65 @@ async function scrapeBasicResult(page) {
 }
 
 async function scrapeWirelessDetail(page) {
-    const out = { mobile_phones: [], phones: [] };
+    const out = { mobile_phones: [], phones: [], address: null };
 
     try {
+        // === PHONE PARSING ===
         const entries = await page.$$eval('.panel-body .col-xs-12.col-md-6', nodes => {
             const results = [];
-
             for (const el of nodes) {
                 const text = el.innerText.trim();
                 const numAnchor = el.querySelector('a[href*="phoneno="]');
                 const number = numAnchor ? numAnchor.innerText.trim() : null;
-
                 if (!number) continue;
 
                 const typeMatch = text.match(/\b(Wireless|Landline|Voip)\b/i);
                 const type = typeMatch ? typeMatch[1].toLowerCase() : 'unknown';
-
-                const lastReported =
-                    (text.match(/Last reported\s+([A-Za-z]+\s+\d{4})/) || [])[1] || null;
-
-                const carrier =
-                    (text.match(/\b(AT&T|Verizon|T-Mobile|Sprint|Metro|Cricket|Frontier|Southwestern Bell|Time Warner Cable)\b/i) || [])[0] || null;
-
+                const lastReported = (text.match(/Last reported\s+([A-Za-z]+\s+\d{4})/) || [])[1] || null;
+                const carrier = (text.match(/\b(AT&T|Verizon|T-Mobile|Sprint|Metro|Cricket|Frontier|Southwestern Bell|Time Warner Cable)\b/i) || [])[0] || null;
                 const isPrimary = /Possible Primary Phone/i.test(text);
 
-                results.push({
-                    number,
-                    type,
-                    carrier,
-                    lastReported,
-                    isPrimary,
-                    raw: text
-                });
+                results.push({ number, type, carrier, lastReported, isPrimary, raw: text });
             }
-
             return results;
         });
 
-        // Sort results and categorize
         for (const r of entries) {
             if (r.type === 'wireless') out.mobile_phones.push(r);
             else out.phones.push(r);
         }
 
+        // === ADDRESS PARSING ===
+        try {
+            // Look specifically for the "Current Address" panel
+            const addrText = await page.evaluate(() => {
+                const panel = Array.from(document.querySelectorAll('.panel.panel-primary'))
+                    .find(p => p.querySelector('.panel-heading')?.innerText?.match(/Current Address/i));
+
+                if (!panel) return null;
+
+                // Get the address text (e.g. "1709 Hastings Ct Plano, TX 75023")
+                const link = panel.querySelector('a.linked-record');
+                if (!link) return null;
+
+                // Flatten newlines and tags
+                return link.innerText
+                    .replace(/\s*\n\s*/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+            });
+
+            if (addrText) {
+                out.address = addrText;
+                console.log('🏠 Detected address:', addrText);
+            } else {
+                console.log('⚠️ No address found on page.');
+            }
+        } catch (e) {
+            console.warn('Address extraction failed:', e.message);
+        }
+
+        // === FINAL LOG ===
         console.log('📞 Parsed phone records:', out);
     } catch (e) {
         console.warn('scrapeWirelessDetail failed:', e.message);
@@ -236,6 +252,8 @@ async function scrapeWirelessDetail(page) {
 
     return out;
 }
+
+
 
 async function loadProxyLines() {
     const RAW_PROXY = process.env.RAW_PROXY;
@@ -605,26 +623,51 @@ async function attemptWithProxy(rawProxy, tryIndex) {
 
                     const scraped = await scrapeWirelessDetail(page).catch(err => {
                         console.warn('scrapeWirelessDetail failed:', err.message);
-                        return { mobile_phones: [], phones: [] };
+                        return {mobile_phones: [], phones: []};
                     });
 
                     console.log('📞 Parsed wireless detail immediately:', scraped);
 
                     // save artifacts & close
-                    const shot = path.join(LOG_DIR, `phones-visible-${Date.now()}.png`);
-                    await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
-                    const statePath = path.join(LOG_DIR, `state-visible-${Date.now()}.json`);
-                    await context.storageState({ path: statePath }).catch(() => {});
+                    const hasData =
+                        (scraped.mobile_phones && scraped.mobile_phones.length > 0) ||
+                        (scraped.phones && scraped.phones.length > 0) ||
+                        scraped.address;
 
-                   try {
-  await page?.close();
-  await context?.close();
-} catch (e) {
-  console.warn('⚠️ Close skipped (undefined page/context):', e.message);
-}
+                    if (hasData) {
+                        console.log('🎯 Success — valid data found, returning to parent function.');
 
-                    await browser.close().catch(() => {});
-                    return { success: true, phones: scraped, screenshot: shot, state: statePath };
+                        const shot = path.join(LOG_DIR, `phones-visible-${Date.now()}.png`);
+                        await page.screenshot({path: shot, fullPage: true}).catch(() => {
+                        });
+                        const statePath = path.join(LOG_DIR, `state-visible-${Date.now()}.json`);
+                        await context.storageState({path: statePath}).catch(() => {
+                        });
+
+
+                        try {
+                            await page?.close();
+                        } catch {
+                        }
+                        try {
+                            await context?.close();
+                        } catch {
+                        }
+                        try {
+                            await browser?.close();
+                        } catch {
+                        }
+
+                        // ✅ Return full structured object to parent
+                        return {
+                            success: true,
+                            reason: 'scraped_ok',
+                            proxyUsed: proxy.host,
+                            data: scraped,
+                            screenshot: shot,
+                            state: statePath
+                        };
+                    }
                 }
 
             } catch (e) {
@@ -1093,15 +1136,23 @@ async function attemptWithProxy(rawProxy, tryIndex) {
 
 
 // Async runner (IIFE)
-; (async () => {
+; // ============================================================
+// 🧩 Exportable Runner
+// ============================================================
+
+async function runFamilyTreeStealth({ first = 'Lauren', last = 'Stevens', city = 'Plano' } = {}) {
     await ensureLogDir();
     const lines = await loadProxyLines();
     if (!lines.length && !RAW_PROXY) {
         console.warn('No proxies found in PROXY_FILE and no PROXY_LINE provided. Exiting.');
-        process.exit(2);
+        return { ok: false, reason: 'no_proxies' };
     }
 
     const pool = lines.length ? lines : [RAW_PROXY];
+    const target = `https://www.familytreenow.com/search/genealogy/results?first=${encodeURIComponent(first)}&last=${encodeURIComponent(last)}&citystatezip=${encodeURIComponent(city)},+TX`;
+    process.env.TARGET_URL = target;
+
+    console.log(`🎯 Target URL: ${target}`);
 
     for (let i = 0, tries = 0; tries < MAX_TRIES && i < pool.length; i = (i + 1) % pool.length, tries++) {
         const raw = pool[i];
@@ -1109,13 +1160,57 @@ async function attemptWithProxy(rawProxy, tryIndex) {
         const res = await attemptWithProxy(raw, tries + 1);
         if (res.success) {
             console.log('✅ Success!', res);
-            process.exit(0);
-        } else {
+
+            // normalize structure for FTN static test integration
+            const inner = res.data || {};
+            const data = {
+                mobile_phones: inner.mobile_phones || [],
+                phones: inner.phones || [],
+                address: inner.address || null,
+                provider: inner.mobile_phones?.[0]?.carrier || null,
+                screenshot: res.screenshot,
+                state: res.state,
+            };
+
+
+            // ✅ match test script expectation
+            return {
+                success: true,
+                reason: 'scraped_ok',
+                proxyUsed: res.proxyUsed || null,
+                data,
+            };
+        }
+        else {
             console.warn('Proxy attempt failed:', res.reason || res.error || 'unknown', res);
         }
     }
 
     console.error('All attempts exhausted or max tries reached. Check logs under', LOG_DIR);
-    process.exit(1);
-})();
+    return { ok: false, reason: 'exhausted' };
+}
+
+// ------------------------------------------------------------
+// 🧱 Dual-mode export / CLI
+// ------------------------------------------------------------
+if (require.main === module) {
+    // CLI mode (stand-alone)
+    const first = process.argv[2] || 'Lauren';
+    const last = process.argv[3] || 'Stevens';
+    const city = process.argv[4] || 'Plano';
+
+    runFamilyTreeStealth({ first, last, city })
+        .then(r => {
+            console.log('Final result:', r);
+            process.exit(r.ok ? 0 : 1);
+        })
+        .catch(err => {
+            console.error('Fatal error:', err);
+            process.exit(1);
+        });
+} else {
+    // Exported function mode
+    module.exports = { runFamilyTreeStealth };
+}
+
 

@@ -1,0 +1,303 @@
+{
+  "cookies": [
+    {
+      "name": "_pxhd",
+      "value": "b39474ea834811586c2c331d47ac7e420616b4d8e1d5977ef272d6bb1ce0a477:7f68d248-a4d3-11f0-b4aa-24535ca9bcf0",
+      "domain": "www.familytreenow.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "pxcts",
+      "value": "825a5a40-a4d3-11f0-8c1a-f74888d002f7",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_pxvid",
+      "value": "7f68d248-a4d3-11f0-b4aa-24535ca9bcf0",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": 1791524878,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "aegis_uid",
+      "value": "11133405939",
+      "domain": "www.familytreenow.com",
+      "path": "/",
+      "expires": 1794548879.925842,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "aegis_tid",
+      "value": "direct",
+      "domain": "www.familytreenow.com",
+      "path": "/",
+      "expires": 1794548879.926042,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_ga",
+      "value": "GA1.1.715480518.1759988883",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": 1794548882.711068,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "ezoma_722506",
+      "value": "999,999",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": 1759990682,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "ezovuuidtime_722506",
+      "value": "1759988882",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": 1760161682,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "lp_722506",
+      "value": "https://www.familytreenow.com/search/genealogy/results?first=Tara&last=Stephenson&citystatezip=Plano,+TX",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": 1759990682,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "ezovuuid_722506",
+      "value": "93846ad4-f0cc-4d49-5ff3-d5b07b99e6d9",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": 1759990682,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "ezoref_722506",
+      "value": "familytreenow.com",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": 1759990682,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "active_template::722506",
+      "value": "pub_site.1759988882",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": 1760161682,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "ezopvc_722506",
+      "value": "1",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": 1759990682,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_ezli_enabled",
+      "value": "true",
+      "domain": "www.familytreenow.com",
+      "path": "/",
+      "expires": 1762580882,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_px3",
+      "value": "421eb8bec5421823e2711f9a65ec4a147d1878eddd2c331f4861d8b6e32d0a93:y1dNLUVZQVYpX+sbOHrOznzRX46URwttdxkXmn4P8ASDzzPBH44pnhgxpUtDWWYlSB2jvH8ALuae/Be3COtHWQ==:1000:b9D9QxHoKuporD8CiPh0kYEunpGNn+IVMFh82qO9qv41oYyxd/yg9GO/5nSL62yw9dMBlI/qAEL7hT1bVJxOp0gvvW521OnCTgb9WL/0aVYq91G6mtgYuyux3MynGEByMfinJ0zaEHU1gtE9+/j4CwGEdM7r9mS74XGEznUdi5g8F+vZ3p+FltRQZn7VIMzoPvnzJ5i89OgWL0BH2x7cYDEaK0S0Lsz9kB1WR29Hbaw=",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": 1759989212,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_li_dcdm_c",
+      "value": ".familytreenow.com",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_lc2_fpi",
+      "value": "9fdc13c2f62b--01k73r68qdqrpr2t1h0ktjftwe",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": 1794548885.226146,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_lc2_fpi_js",
+      "value": "9fdc13c2f62b--01k73r68qdqrpr2t1h0ktjftwe",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "ezhbf",
+      "value": "0",
+      "domain": "www.familytreenow.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "id5",
+      "value": "d7aa0f3b-97aa-7e15-9e74-179317a43bd6#1759988884522#0",
+      "domain": ".id5-sync.com",
+      "path": "/",
+      "expires": 1767764884.653236,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "_sharedid",
+      "value": "e434d810-b558-4660-85c4-fb1c540706c7",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": 1791524885,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_sharedid_cst",
+      "value": "hCxbLHksQQ%3D%3D",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": 1791524885,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_lr_retry_request",
+      "value": "true",
+      "domain": "www.familytreenow.com",
+      "path": "/",
+      "expires": 1759992485,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_lr_env_src_ats",
+      "value": "false",
+      "domain": "www.familytreenow.com",
+      "path": "/",
+      "expires": 1762580885,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_lc2_fpi_meta",
+      "value": "%7B%22w%22%3A1759988885225%7D",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": 1794548885.226338,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_ga_8VQWKTVM5N",
+      "value": "GS2.1.s1759988882$o1$g0$t1759988885$j57$l0$h0",
+      "domain": ".familytreenow.com",
+      "path": "/",
+      "expires": 1794548885.315804,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "https://www.familytreenow.com",
+      "localStorage": [
+        {
+          "name": "id5id_cached_consent_data",
+          "value": "691362307608170"
+        },
+        {
+          "name": "_li_duid",
+          "value": "9fdc13c2f62b--01k73r68qdqrpr2t1h0ktjftwe"
+        },
+        {
+          "name": "PX9ZNhhnmt_px_hvd",
+          "value": "a6d6eb9c0070024e23ff00889017795f"
+        },
+        {
+          "name": "id5id_cached_consent_data_exp",
+          "value": "Wed, 07 Jan 2026 05:48:03 GMT"
+        },
+        {
+          "name": "PX9ZNhhnmt_px-ff",
+          "value": "eyJjYyI6eyJ0dGwiOjE3NTk5ODg5NDIsInZhbCI6IlUyRnRaVk5wZEdVOVRHRjRPdz09In19"
+        },
+        {
+          "name": "id5id_extensions",
+          "value": "{\"data\":{\"lbCDN\":\"%%LB_CDN%%\",\"lb\":\"cEoTMxrGWIwfRZZ5x17qLg==\",\"ttl\":28800,\"bounce\":{\"setCookie\":true}},\"expireAt\":1760017685322}"
+        },
+        {
+          "name": "_lc2_fpi_meta",
+          "value": "{\"w\":1759988885225}"
+        },
+        {
+          "name": "_lc2_fpi",
+          "value": "9fdc13c2f62b--01k73r68qdqrpr2t1h0ktjftwe"
+        }
+      ]
+    }
+  ]
+}
