@@ -8,7 +8,7 @@
     "npm": "10.x"
   },
   "scripts": {
-    "start": "node nextdoorAutomationDallas.js",
+    "start": "node nextdoorAutomationPlano.js",
     "test": "node runFamilyTreeStealth.js",
     "postinstall": "npx playwright install chromium"
   },

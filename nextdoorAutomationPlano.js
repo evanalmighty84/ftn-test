@@ -1,4 +1,4 @@
-// nextdoorAutomationDallas.js
+// nextdoorAutomationPlano.js
 require('dotenv').config();
 const path = require('path');
 const { chromium } = require('playwright');
@@ -6,7 +6,7 @@ const OpenAI = require('openai');
 const pool = require('./db/db');
 const fs = require('fs');
 const { personSearchAndScrape } = require('./melissaLookup');
-const { postLeadAlert, canonIndustry } = require('./leadAlertClient');
+const { postLeadAlert } = require('./leadAlertClient');
 const { runFamilyTreeStealth } = require('./runFamilyTreeStealth');
 
 
@@ -26,17 +26,31 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 // const MAX_DMS_PER_DAY = 7;
 // const DM_PAUSE_MS = 1500;
 
-const CITY = 'Dallas';
+const CITY = 'Plano';
 
 const SEARCH_TERMS = [
-    { label: 'Pool Cleaner',     query: 'pool cleaner',     type: 'pool',           needsMostRecent: true },
-    { label: 'Pool Maintenance', query: 'pool maintenance', type: 'pool',           needsMostRecent: true },
-    { label: 'Handyman',         query: 'handyman',         type: 'handyman',       needsMostRecent: true },
-    { label: 'Plumber',          query: 'plumber',          type: 'plumber',        needsMostRecent: true },
-    { label: 'House Cleaner',    query: 'house cleaner',    type: 'house_cleaner',  needsMostRecent: true },
-    { label: 'Lawn Care',        query: 'lawn care',        type: 'lawn_care',      needsMostRecent: true },
-    { label: 'Pest Control',     query: 'pest control',     type: 'pest_control',   needsMostRecent: true }
+    { label: 'Pool Cleaner',        query: 'pool cleaner',         type: 'pool',               needsMostRecent: true },
+    { label: 'Pool Maintenance',    query: 'pool maintenance',     type: 'pool',               needsMostRecent: true },
+    { label: 'Handyman',            query: 'handyman',             type: 'handyman',           needsMostRecent: true },
+    { label: 'Plumber',             query: 'plumber',              type: 'plumber',            needsMostRecent: true },
+    { label: 'House Cleaner',       query: 'house cleaner',        type: 'house_cleaner',      needsMostRecent: true },
+    { label: 'Lawn Care',           query: 'lawn care',            type: 'lawn_care',          needsMostRecent: true },
+    { label: 'Pest Control',        query: 'pest control',         type: 'pest_control',       needsMostRecent: true },
+
+    // ⚡ New trades
+    { label: 'Electrician',         query: 'electrician',          type: 'electrician',        needsMostRecent: true },
+    { label: 'General Contractor',  query: 'general contractor',   type: 'general_contractor', needsMostRecent: true },
+    { label: 'Roofer',              query: 'roofer',               type: 'roofer',             needsMostRecent: true },
+    { label: 'Junk Removal',        query: 'junk removal',         type: 'junk_removal',       needsMostRecent: true },
+    { label: 'Pet Sitter',          query: 'pet sitter',           type: 'pet_sitter',         needsMostRecent: true },
+    { label: 'Painter',             query: 'painter',              type: 'painter',            needsMostRecent: true },
+
+    // 🏠 Added: Realtor + Mover
+    { label: 'Realtor',             query: 'realtor',              type: 'realtor',            needsMostRecent: true },
+    { label: 'Mover',               query: 'mover',                type: 'mover',              needsMostRecent: true }
 ];
+
+
 
 
 
@@ -72,29 +86,9 @@ async function waitForFeed(page, totalMs = 90_000) {
 }
 
 
-/* ------------------------- Helpers: Stealth + Login ------------------------ */
 
-async function handleChooseAddress(page) {
-    if (!/\/choose_address/i.test(page.url())) return;
-    try {
-        await page.fill('input[placeholder*="address" i], input[name*="address"]', '1707 Hastings Court');
-        await page.fill('input[placeholder*="zip" i], input[name*="zip"]', '75023');
 
-        const nextBtn = page.locator('button:has-text("Continue"), button:has-text("Next")').first();
-        if (await nextBtn.count()) {
-            await Promise.all([page.waitForLoadState('domcontentloaded'), nextBtn.click()]);
-        }
 
-        const confirm = page.locator('button:has-text("Confirm neighborhood"), button:has-text("Join")').first();
-        if (await confirm.count()) {
-            await Promise.all([page.waitForLoadState('domcontentloaded'), confirm.click()]);
-        }
-
-        console.log('✅ Address submitted/confirmed');
-    } catch (e) {
-        console.warn('⚠️ Address autofill failed:', e.message);
-    }
-}
 
 /** Wipe cookies + site storage for Nextdoor so each run is “clean”. */
 async function clearNextdoorStorage(context, phase = 'startup') {
@@ -134,13 +128,7 @@ async function clearNextdoorStorage(context, phase = 'startup') {
     }
 }
 
-async function saveScreenshot(page, label = 'login') {
-    const path = `/tmp/${label}_${Date.now()}.png`;
-    await page.screenshot({ path, fullPage: true });
-    const res = await cloudinary.uploader.upload(path, { folder: 'nextdoor-screenshots' });
-    console.log(`📸 Screenshot uploaded: ${res.secure_url}`);
-    return res.secure_url;
-}
+
 
 
 async function ensureLoggedIn(page) {
@@ -235,10 +223,8 @@ async function ensureLoggedIn(page) {
         return;
     }
 
-    // still no luck – capture context and fail
-    try { await saveScreenshot(page, 'login_timeout')
-    } catch {}
-    console.log('📸 Saved screenshot before throwing error:', page.url());
+
+
     throw new Error('Login appears to have failed (feed not visible).');
 }
 
@@ -404,7 +390,7 @@ async function filterNewLeads(posts) {
     const urls = posts.map((p) => p.url);
     const { rows } = await pool.query('SELECT post_url FROM nextdoor_messages WHERE post_url = ANY($1)', [urls]);
     const seen = new Set(rows.map((r) => r.post_url));
-    return posts.filter((p) => !seen.has(p.url));
+    return posts.filter((p) => !seen.has(p. url));
 }
 
 /* --------------------------- GPT Lead Classifier --------------------------- */
@@ -460,47 +446,58 @@ async function classifyPosts(posts, labelType = 'pool') {
     if (!posts.length) return [];
 
     const SYSTEM_PROMPTS = {
-        pool: `You’re classifying neighborhood posts. Label "lead" ONLY if the author is seeking pool/spa/hot tub service (cleaning, maintenance, equipment like pump/chlorinator/filter, green pool, quotes or recommendations for a pool pro).
-If it's about plumbing (toilets, sinks, faucets, water heaters, sewer, general leaks not clearly about a pool) or irrigation/sprinklers, label "not_lead".
+        electrician: `You’re classifying neighborhood posts. Label "lead" ONLY if the author is seeking an electrician or electrical services (outlets, wiring, breaker panels, lights, switches, ceiling fans, generators, EV charger installs, new circuits, power outages, electrical inspections).
+Label "not_lead" if it's about general handyman work, appliances, HVAC, or unrelated topics.
 Return ONLY JSON in input order: [{"label":"lead"|"not_lead","reason":"..."}]. Be strict.`,
 
-        handyman: `You’re classifying neighborhood posts. Label "lead" ONLY if the author is seeking handyman or plumbing help (repairs, leaks, faucets, toilets, water heater, mounting, drywall, doors, tile, general recommendations).
-If it's about pool/spa/hot tub maintenance or equipment, label "not_lead".
+        general_contractor: `You’re classifying neighborhood posts. Label "lead" ONLY if the author is seeking a general contractor, builder, remodeler, or construction company for renovations, additions, remodels, or new home/commercial builds.
+Label "not_lead" if the post is only about specific trades (plumbing, roofing, painting, flooring, etc.) or unrelated home services.
 Return ONLY JSON in input order: [{"label":"lead"|"not_lead","reason":"..."}]. Be strict.`,
 
-        plumber: `You’re classifying neighborhood posts. Label "lead" ONLY if the author is seeking plumbing help (toilets, sinks, faucets, water heaters, pipes, leaks, etc.) or mentions needing a licensed plumber.
-If it's about irrigation, landscaping, pools, or handyman services, label "not_lead".
+        roofer: `You’re classifying neighborhood posts. Label "lead" ONLY if the author is seeking roofing services (roof repair, replacement, leak detection, hail/wind damage, shingles, flashing, gutters tied to roofing).
+Label "not_lead" if it's about general contracting, siding, gutters only, or interior repairs.
 Return ONLY JSON in input order: [{"label":"lead"|"not_lead","reason":"..."}]. Be strict.`,
 
-        house_cleaner: `You’re classifying neighborhood posts. Label "lead" ONLY if the author is seeking residential house cleaning, maid service, or housekeeping (including deep cleans, move-in/move-out, Airbnb turnover, carpet cleaning, window cleaning, bathroom/kitchen cleaning, etc.).
-Include all indoor or recurring cleaning services for homes, apartments, condos, and short-term rentals.
-Label "not_lead" if the post is advertising a cleaning business, or if it's unrelated (e.g. junk removal, pest control, landscaping, babysitting, organizing/decluttering-only, etc.).
+        junk_removal: `You’re classifying neighborhood posts. Label "lead" ONLY if the author is seeking junk removal, trash hauling, debris pickup, appliance/furniture removal, garage cleanouts, or moving cleanups.
+Label "not_lead" if it’s about house cleaning, lawn care, or someone selling or giving away items.
 Return ONLY JSON in input order: [{"label":"lead"|"not_lead","reason":"..."}]. Be strict.`,
 
-        lawn_care: `You’re classifying neighborhood posts. Label "lead" ONLY if the author is seeking lawn mowing, edging, yard cleanup, weed removal, or general lawn maintenance or landscaping services.
-Label "not_lead" if it's about pest control, irrigation, tree trimming, or unrelated topics.
+        pet_sitter: `You’re classifying neighborhood posts. Label "lead" ONLY if the author is seeking a pet sitter, dog walker, boarding, feeding, or animal care service (cats, dogs, etc.).
+Label "not_lead" if the post is about adopting, selling pets, lost/found animals, or general pet discussions.
 Return ONLY JSON in input order: [{"label":"lead"|"not_lead","reason":"..."}]. Be strict.`,
 
-        pest_control: `You’re classifying neighborhood posts. Label "lead" ONLY if the author is asking for pest control services (ants, roaches, spiders, termites, mice, rats, wasps, etc.) or exterminator recommendations.
-Label "not_lead" if it's about cleaning, lawn care, handyman work, or unrelated services.
+        painter: `You’re classifying neighborhood posts. Label "lead" ONLY if the author is seeking painting services (interior, exterior, cabinets, fences, staining, drywall prep, texture, or quotes for a painter).
+Label "not_lead" if it's about other trades like roofing, remodeling, handyman work, or decorative art.
+Return ONLY JSON in input order: [{"label":"lead"|"not_lead","reason":"..."}]. Be strict.`,
+        realtor: `You’re classifying neighborhood posts. Label "lead" ONLY if the author is seeking a realtor, real estate agent, or broker to help buy, sell, or rent a home/property.
+Label "not_lead" if the post is advertising a realtor service, discussing market news, or unrelated to real estate transactions.
+Return ONLY JSON in input order: [{"label":"lead"|"not_lead","reason":"..."}]. Be strict.`,
+
+        mover: `You’re classifying neighborhood posts. Label "lead" ONLY if the author is seeking movers, moving companies, or help with loading, unloading, packing, or moving trucks.
+Label "not_lead" if it’s about junk removal, storage, deliveries, or unrelated topics.
 Return ONLY JSON in input order: [{"label":"lead"|"not_lead","reason":"..."}]. Be strict.`
+
     };
 
 
-    const system = SYSTEM_PROMPTS[labelType] || SYSTEM_PROMPTS.pool;
+    const system = String(SYSTEM_PROMPTS[labelType] || SYSTEM_PROMPTS.pool);
     const user = `Posts:\n${posts.map((p, i) => `#${i + 1}\n${p.text}`).join('\n')}`;
 
     const resp = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
         temperature: 0,
-        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+        messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user }
+        ]
     });
+
 
     const raw = resp.choices?.[0]?.message?.content || '[]';
     try {
         return JSON.parse(raw);
     } catch {
-        const m = raw.match(/\[[\s\S]*\]/);
+        const m = raw.match(/\[[\s\S]*]/);
         return m ? JSON.parse(m[0]) : posts.map(() => ({ label: 'not_lead', reason: 'parse error' }));
     }
 }
@@ -511,7 +508,7 @@ function extractCityFromAddress(addr = '') {
     return match ? match[1] : null;
 }
 
-async function melissaTX(author, { city, lead_type, description, location } = {}) {
+async function melissaTX(author = {}) {
     const name = (author || '').trim();
     if (!name || name.split(' ').length < 2) {
         return { phone: null, email: null, physical_address: null };
@@ -573,8 +570,7 @@ const runNextdoorAutomation = async () => {
     ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy', 'NO_PROXY', 'no_proxy']
         .forEach(k => { if (process.env[k]) delete process.env[k]; });
 
-    // Force-off: do not read any PROXY_URL* vars
-    const PROXY_URL = ''; // <— always empty so Playwright won’t use a proxy
+
 
     // --- portable profile dir resolution (Railway uses /data, local uses OS tmp) ---
     const baseDefault = fs.existsSync('/data') ? '/data' : os.tmpdir();
@@ -662,7 +658,7 @@ const runNextdoorAutomation = async () => {
             const leads = enriched.filter((p) => p.label === 'lead');
             const keywordTighten = {
                 pool: (p) =>
-                    /\b(pool|spa|chlorine|skimmer|pump|filter|backwash|algae|acid|resurface|pebble|tile|saltwater|clean[^\s]*|maintenance)\b/i.test(p.text),
+                    /\b(pool|spa|chlorine|skimmer|pump|filter|backwash|algae|acid|resurface|pebble|tile|saltwater|clean\S*|maintenance)\b/i.test(p.text),
 
                 handyman: (p) =>
                     /\b(handyman|fix|repair|mount|install|honey-do|leak|hole|drywall|tv|fence|gate|door|cabinet|window|shelf|hinge|caulk|patch)\b/i.test(p.text),
@@ -728,18 +724,23 @@ const runNextdoorAutomation = async () => {
 
                 let phone = null, email = null, physical_address = null;
                 const descParts = [description].filter(Boolean);
+// 🧱 Safe default objects to avoid null-reference errors downstream
+                let ftn = { success: false, mobile_phones: [], phones: [], provider: null, address: null };
+                let melissa = { phone: null, email: null, physical_address: null, source: null };
 
-                // 🕵️ Run FamilyTreeNow Stealth lookup
+
+
                 try {
                     console.log(`🕵️ Running FamilyTreeNow Stealth for ${author} (${CITY})...`);
                     const [first, last] = (author || '').split(/\s+/, 2);
 
-                    const ftn = await runFamilyTreeStealth({ first, last, city: CITY });
+                    // ✅ Always define ftnResult, even if scraper crashes
+                    const ftnResult = await runFamilyTreeStealth({ first, last, city: CITY }) || {};
 
-                    if (ftn?.success && ftn.data) {
+                    if (ftnResult.success && ftnResult.data) {
                         console.log('✅ FTN lookup succeeded.');
-                        const data = ftn.data;
 
+                        const data = ftnResult.data;
                         const wireless = (data.mobile_phones || []).map(p => p.number);
                         const landlines = (data.phones || []).map(p => p.number);
                         const uniquePhones = [...new Set([...wireless, ...landlines].filter(Boolean))];
@@ -757,23 +758,35 @@ const runNextdoorAutomation = async () => {
                         if (data.provider) {
                             descParts.push(`Provider: ${data.provider}`);
                         }
+
+                        // ✅ If you want to propagate the FTN result to the parent caller:
+                        ftn = { success: true, ...ftnResult };
+
                     } else {
-                        console.log(`⚠️ FTN returned no data for ${author} — falling back to Melissa.`);
-                        const mel = await personSearchAndScrape(null, {
+                        console.warn(`⚠️ FTN returned no data for ${author} — falling back to Melissa.`);
+
+                        melissa = await personSearchAndScrape(null, {
                             name: `${first} ${last}`,
                             state: 'TX',
                             city: CITY
                         });
 
-                        if (mel?.phone) phone = mel.phone;
-                        if (mel?.email) email = mel.email;
-                        if (mel?.physical_address) physical_address = mel.physical_address;
+                        if (melissa?.phone) phone = melissa.phone;
+                        if (melissa?.email) email = melissa.email;
+                        if (melissa?.physical_address) physical_address = melissa.physical_address;
 
                         descParts.push(`Melissa: ${phone || 'none'}`);
+
+                        // ✅ Even in fallback, define ftn to avoid undefined references downstream
+                        ftn = { success: false, reason: ftnResult.reason || 'no_data', data: null };
                     }
+
                 } catch (err) {
-                    console.warn(`⚠️ FTN/Melissa enrichment failed for ${author}:`, err.message);
+                    console.error(`❌ FTN/Melissa enrichment failed for ${author}:`, err?.message || err);
+                    ftn = { success: false, reason: 'exception', error: err?.message || String(err) };
                 }
+
+
 
 
 
@@ -904,5 +917,17 @@ const runNextdoorAutomation = async () => {
 };
 
 
-if (require.main === module) runNextdoorAutomation();
+if (require.main === module) {
+    runNextdoorAutomation()
+        .then(() => {
+            console.log('✅ Nextdoor automation completed.');
+            process.exit(0);
+        })
+        .catch((err) => {
+            console.error('❌ Fatal error in Nextdoor automation:', err);
+            process.exit(1);
+        });
+}
+
 module.exports = runNextdoorAutomation;
+
