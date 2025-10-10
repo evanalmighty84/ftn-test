@@ -1,4 +1,4 @@
-// nextdoorAutomationPlano.js
+// nextdoorAutomationMckinney.js
 require('dotenv').config();
 const path = require('path');
 const { chromium } = require('playwright');
@@ -26,7 +26,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 // const MAX_DMS_PER_DAY = 7;
 // const DM_PAUSE_MS = 1500;
 
-const CITY = 'Plano';
+const CITY = 'Mckinney';
 
 const SEARCH_TERMS = [
     { label: 'Pool Cleaner',        query: 'pool cleaner',         type: 'pool',               needsMostRecent: true },
