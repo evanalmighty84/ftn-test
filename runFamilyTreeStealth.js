@@ -1156,7 +1156,7 @@ async function runFamilyTreeStealth({ first, last, city } = {}) {
     const pool = lines.length ? lines : [RAW_PROXY];
 
     // 🎯 Build dynamic FTN URL for the given person
-    const target = `https://www.familytreenow.com/search/genealogy/results?first=${encodeURIComponent(first)}&last=${encodeURIComponent(last)}&citystatezip=${encodeURIComponent(city)},+TX`;
+    const target = `https://www.familytreenow.com/search/genealogy/results?first=${encodeURIComponent(first)}&last=${encodeURIComponent(last)}&citystatezip=${encodeURIComponent(city)},+CA`;
 
     console.log(`🎯 Target URL: ${target}`);
 

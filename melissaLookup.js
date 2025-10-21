@@ -18,8 +18,8 @@ async function loginMelissa(page) {
     }
 }
 
-// --- Helper: force the State to TX across select/input/combobox variants ---
-async function forceStateTX(page, abbr = 'TX', full = 'Texas') {
+// --- Helper: force the State to CA across select/input/combobox variants ---
+async function forceStateCA(page, abbr = 'CA', full = 'California') {
     // 1) Plain <select>
     const selects = [
         'select[name="state"]',
@@ -67,8 +67,8 @@ async function forceStateTX(page, abbr = 'TX', full = 'Texas') {
 
 
 
-// --- Main lookup with TX forcing + TX-row preference ---
-async function personSearchAndScrape(browser, { name, city = '', state = 'TX', zip = '' }) {
+// --- Main lookup with CA forcing + CA-row preference ---
+async function personSearchAndScrape(browser, { name, city = '', state = 'CA', zip = '' }) {
     const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
     const page = await context.newPage();
 
@@ -83,8 +83,8 @@ async function personSearchAndScrape(browser, { name, city = '', state = 'TX', z
     if (city) await page.fill('input[name="city"], input[placeholder*="City"]', city).catch(() => {});
     if (zip)  await page.fill('input[name="postalCode"], input[placeholder*="ZIP"]', zip).catch(() => {});
 
-    // Force TX regardless of control type
-    if (state) await forceStateTX(page, state, 'Texas');
+    // Force CA regardless of control type
+    if (state) await forceStateCA(page, state, 'California');
 
     // (optional) log what we think it is
     try {
@@ -106,12 +106,12 @@ async function personSearchAndScrape(browser, { name, city = '', state = 'TX', z
     const rows = page.locator('table tbody tr');
     await rows.first().waitFor({ timeout: 20000 });
 
-    // Prefer a TX row
+    // Prefer a CA row
     let clicked = false;
     const count = await rows.count();
     for (let i = 0; i < count; i++) {
         const txt = (await rows.nth(i).innerText()).toUpperCase();
-        if (txt.includes(' TX ') || txt.endsWith(' TX') || txt.includes(' TX-')) {
+        if (txt.includes(' CA ') || txt.endsWith(' CA') || txt.includes(' CA-')) {
             const link = rows
                 .nth(i)
                 .locator('a.btnAjax[href*="/home/personator/index"], a.btnAjax[href*="/home/mikpersoninfo/index"]')
