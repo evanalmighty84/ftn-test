@@ -52,67 +52,77 @@ function normalizeProxy(raw) {
 }
 
 async function pickAndOpenDetail(page, state) {
-    const candidates = [
-        'table tbody tr',
-        '.search-results .result',
-        '.results .result',
-        'ul.results > li',
-        '.people-results li',
-        '.content .result',
-    ];
+    try {
+        console.log('🔎 Looking for "View Details" link...');
 
-    const findSel = async () => {
-        for (const sel of candidates) {
-            try {
-                const found = await page.locator(sel).first();
-                if (await found.count()) return sel;
-            } catch (e) {}
-        }
-        return null;
-    };
+        const detailSelectors = [
+            'a:has-text("View Details")',
+            'button:has-text("View Details")',
+            'a[href*="/record/"]',
+            'a[href*="rid="]'
+        ];
 
-    let resultsSel = await findSel();
-    if (!resultsSel) {
-        await page.waitForTimeout(800);
-        const cur = await page.evaluate(() => location.href);
-        await page.evaluate((url) => location.href = url, cur);
-        await page.waitForTimeout(1000);
-        resultsSel = await findSel();
-    }
-    if (!resultsSel) return false;
+        let clicked = false;
+        let href = null;
 
-    const results = page.locator(resultsSel);
-    const rCount = await results.count();
-    if (!rCount) return false;
+        // Try clicking one of the common selectors
+        for (const sel of detailSelectors) {
+            const el = page.locator(sel).first();
+            if (await el.count()) {
+                href = await el.getAttribute('href');
+                console.log(`➡️ Found detail link (${sel}): ${href || 'no href'}`);
 
-    const pref = (state || '').toUpperCase();
-    for (let i = 0; i < Math.min(rCount, 50); i++) {
-        const row = results.nth(i);
-        const text = ((await row.innerText().catch(() => '')) || '').trim();
-        if (!pref || text.includes(pref)) {
-            const href = await row.locator(
-                'a:has-text("View"), a:has-text("Details"), a:has-text("Profile"), a[href*="/record/"], a[href*="detail"], a[href*="profile"]'
-            ).first().getAttribute('href').catch(() => null);
-            if (href) {
-                const url = new URL(href, await page.evaluate(() => location.href)).toString();
-                await page.evaluate((u) => { location.href = u; }, url);
-                await page.waitForTimeout(3000);
-                return true;
+                if (href && !href.startsWith('http')) {
+                    const base = new URL(page.url());
+                    href = base.origin + href;
+                }
+
+                try {
+                    await el.scrollIntoViewIfNeeded();
+                    await el.click({ delay: 200 });
+                    clicked = true;
+                    break;
+                } catch (clickErr) {
+                    console.warn(`⚠️ Click failed for ${sel}: ${clickErr.message}`);
+                }
             }
         }
-    }
 
-    // fallback: just use the first row's link if nothing matched
-    const firstHref = await results.first().locator('a[href]').first().getAttribute('href').catch(() => null);
-    if (firstHref) {
-        const url = new URL(firstHref, await page.evaluate(() => location.href)).toString();
-        await page.evaluate((u) => { location.href = u; }, url);
-        await page.waitForTimeout(3000);
-        return true;
-    }
+        // If click failed or no element found, try direct navigation
+        if (!clicked && href) {
+            console.log('🌐 Navigating directly to record URL:', href);
+            await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            clicked = true;
+        }
 
-    return false;
+        if (!clicked) {
+            console.warn('⚠️ Could not find or click any detail link.');
+            return false;
+        }
+
+        // Wait for navigation or new content
+        await page.waitForLoadState('domcontentloaded', { timeout: 20000 }).catch(() => {});
+        await page.waitForTimeout(2500);
+
+        // Confirm that we’re now on a detail page
+        const isDetail = await page.evaluate(() => {
+            const txt = document.body?.innerText || '';
+            return /Possible Primary Phone|Current Address|Public Records|Phone Type/i.test(txt);
+        });
+
+        if (isDetail) {
+            console.log('✅ Reached detail page successfully!');
+            return true;
+        }
+
+        console.warn('⚠️ Clicked but no detail page detected — maybe Cloudflare intervened.');
+        return false;
+    } catch (err) {
+        console.error('pickAndOpenDetail() failed:', err.message);
+        return false;
+    }
 }
+
 
 
 async function scrapeBasicResult(page) {
@@ -271,52 +281,20 @@ async function probeExitIp(proxy) {
     }
 }
 
-async function attemptWithProxy(rawProxy, tryIndex,target) {
+async function attemptWithProxy(rawProxy, tryIndex, target) {
     const cleaned = rawProxy.trim();
     let proxy;
     try {
         proxy = normalizeProxy(cleaned);
     } catch (e) {
         console.error('Proxy parse failed:', e.message);
-        return {success: false, reason: 'parse', error: e.message};
+        return { success: false, reason: 'parse', error: e.message };
     }
 
     console.log(`\n--- Attempt #${tryIndex} using proxy: ${proxy.host}:${proxy.port} (user: ${!!proxy.username}) ---`);
-    // probe
-    const probe = await probeExitIp(proxy);
-    if (!probe.ok) {
-        console.warn('Exit IP probe failed:', probe.error);
-        // still continue: sometimes ipinfo blocks but browser will still work
-    } else {
-        console.log('Exit IP probe success:', probe.data);
-    }
 
-    // new fresh profile directory
     const profileDir = path.resolve(`./ftn-profile-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
-    await fsp.mkdir(profileDir, {recursive: true});
-
-    // stealth init script to hide webdriver and some flags (keeps it minimal)
-    const stealthInit = `
-    // minimal stealth adjustments
-    Object.defineProperty(navigator, 'webdriver', { get: () => false });
-    Object.defineProperty(navigator, 'languages', { get: () => ['en-US','en'] });
-    Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3,4,5] });
-    // mimic Chrome permissions
-    const originalQuery = window.navigator.permissions.query;
-    try {
-      window.navigator.permissions.__query = originalQuery;
-      window.navigator.permissions.query = (parameters) => (
-        parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters)
-      );
-    } catch(e) {}
-    // small helper for controlled navigation
-    window.__rtNavigate = async function (url) {
-      try {
-        location.href = url;
-        return true;
-      } catch(e) { return false; }
-    };
-  `;
+    await fsp.mkdir(profileDir, { recursive: true });
 
     const proxyForPlaywright = proxy
         ? {
@@ -329,798 +307,195 @@ async function attemptWithProxy(rawProxy, tryIndex,target) {
         }
         : undefined;
 
+    const baseLaunchOpts = {
+        headless: false, // must be headful for JS+WebGL checks
+        channel: 'chrome',
+        proxy: proxyForPlaywright,
+        args: [
+            '--no-sandbox',
+            '--disable-blink-features=AutomationControlled',
+            '--window-size=1366,768',
+            '--enable-gpu',
+            '--use-gl=egl',
+            '--enable-webgl',
+            '--ignore-certificate-errors',
+            '--allow-running-insecure-content',
+        ],
+    };
+
     let browser, context, page;
-
     try {
-        // === Environment flags ===
-        const useChrome = process.env.USE_CHROME === '1';
-        // 🚫 Force headless in Railway or Docker — no X11
+        browser = await chromium.launch(baseLaunchOpts);
+        context = await browser.newContext({ viewport: { width: 1366, height: 768 } });
 
-
-        // --- Base Chromium launch options ---
-        const isRailway = !!process.env.RAILWAY_ENVIRONMENT;
-        const headless = isRailway ? false : true;
-
-        const baseLaunchOpts = {
-            headless,
-            viewport: { width: 1366, height: 768 },
-            args: [
-                '--no-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-setuid-sandbox',
-                '--disable-blink-features=AutomationControlled',
-                '--use-gl=swiftshader',
-                '--disable-software-rasterizer',
-                '--window-size=1366,768',
-            ],
-        };
-
-
-
-        if (proxyForPlaywright) baseLaunchOpts.proxy = proxyForPlaywright;
-
-        const opts = useChrome ? { ...baseLaunchOpts, channel: 'chrome' } : baseLaunchOpts;
-
-
-        const browser = await chromium.launch({
-            headless: false, // non-headless because Railway uses Xvfb
-            channel: 'chrome',
-            args: [
-                '--no-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-setuid-sandbox',
-                '--disable-blink-features=AutomationControlled',
-                '--use-gl=swiftshader',
-                '--disable-software-rasterizer',
-                '--window-size=1366,768',
-            ],
+        // --- Anti-detection fingerprint injection ---
+        await context.addInitScript(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => false });
+            Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
+            Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+            Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+            Object.defineProperty(navigator, 'language', { get: () => 'en-US' });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            window.chrome = { runtime: {} };
         });
 
-        const context = await browser.newContext();
+        page = await context.newPage();
+
+        console.log(`Navigating to target: ${target}`);
+        await page.goto(target, { waitUntil: 'load', timeout: 60000 });
+        await page.waitForTimeout(7000 + Math.random() * 2000);
+
+        // --- Detect Cloudflare JS block early ---
+        const bodyText = await page.evaluate(() => document.body?.innerText || '');
+        if (/Please enable JS/i.test(bodyText)) {
+            console.warn('⚠️ Cloudflare JS block detected — rotating proxy...');
+            await browser.close();
+            return { success: false, reason: 'js_blocked' };
+        }
+
+        // --- Wait for FunCaptcha/ArkoseLabs iframe ---
+// --- Wait for FunCaptcha/ArkoseLabs iframe ---
+        let arkoseFrame = null;
+        try {
+            const iframeEl = await page.$('iframe[src*="arkoselabs"]');
+            if (iframeEl) {
+                arkoseFrame = iframeEl;
+                console.log('🧩 ArkoseLabs FunCaptcha detected — solving via 2Captcha...');
+            }
+        } catch (e) {
+            console.warn('ArkoseLabs iframe check failed:', e.message);
+        }
 
 
+        if (arkoseFrame) {
+            console.log('🧩 ArkoseLabs FunCaptcha detected — solving via 2Captcha...');
 
+            // Extract sitekey from iframe src
+            const sitekey = await page.evaluate(() => {
+                const ifr = document.querySelector('iframe[src*="arkoselabs"]');
+                if (!ifr) return null;
+                const m = ifr.src.match(/[?&]public_key=([\w-]+)/);
+                return m ? m[1] : null;
+            });
 
+            if (sitekey) {
+                console.log('🎯 FunCaptcha sitekey:', sitekey);
+                const apiKey = process.env.TWOCAPTCHA_API_KEY;
+                if (!apiKey) {
+                    console.warn('❌ Missing TWOCAPTCHA_API_KEY');
+                    return { success: false, reason: 'no_2captcha_key' };
+                }
 
-        console.log(
-            `✅ Chromium launched (${useChrome ? 'chrome channel' : 'default'}) in headless mode.`
+                const payload = {
+                    clientKey: apiKey,
+                    task: {
+                        type: 'FunCaptchaTaskProxyless',
+                        websiteURL: target,
+                        websitePublicKey: sitekey,
+                        funcaptchaApiJSSubdomain: 'client-api.arkoselabs.com',
+                        userAgent: UA,
+                    },
+                };
+
+                const create = await axios.post('https://api.2captcha.com/createTask', payload);
+                const taskId = create.data.taskId;
+                console.log('🪄 Created 2Captcha task ID:', taskId);
+
+                // poll for result
+                let token = null;
+                for (let i = 0; i < 25; i++) {
+                    await new Promise(r => setTimeout(r, 6000));
+                    const res = await axios.post('https://api.2captcha.com/getTaskResult', {
+                        clientKey: apiKey,
+                        taskId,
+                    });
+                    if (res.data.status === 'ready') {
+                        token = res.data.solution.token;
+                        break;
+                    }
+                }
+
+                if (!token) {
+                    console.warn('❌ FunCaptcha solver timed out — rotating proxy...');
+                    await browser.close();
+                    return { success: false, reason: 'fun_captcha_timeout' };
+                }
+
+                console.log('✅ FunCaptcha solved — injecting token...');
+                await page.evaluate(tok => {
+                    const el = document.querySelector('input[name="fc-token"]');
+                    if (el) el.value = tok;
+                    const form = document.querySelector('form');
+                    if (form) form.submit();
+                }, token);
+
+                await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+                await page.waitForTimeout(5000);
+            }
+        }
+
+        // --- Wait for DOM stabilization / FTN load ---
+        console.log('⏳ Waiting up to 15 s for FTN DOM/text to stabilize...');
+        await page.waitForFunction(
+            () => document.querySelector('.panel-body') || /Results|record|Phone/i.test(document.body.innerText),
+            { timeout: 15000 }
         );
 
+        const text = await page.evaluate(() => document.body.innerText.slice(0, 400));
+        console.log('✅ Page text indicates results/challenge visible.\n', text);
 
-        // --- turnstile hook injected BEFORE navigation ---
-// Note: this must be added before page.goto(); we assume `context` exists
-        const turnstileHook = `
-(() => {
-  // Poll and intercept turnstile.render as early as possible
-  const i = setInterval(() => {
-    try {
-      if (window.turnstile && typeof window.turnstile.render === 'function') {
-        clearInterval(i);
-        const orig = window.turnstile.render.bind(window.turnstile);
-        window.turnstile.render = (a, b) => {
-          try {
-            // capture the important fields Cloudflare docs ask for
-            const payload = {
-              type: 'TurnstileTaskProxyless',
-              websiteKey: b && b.sitekey ? b.sitekey : null,
-              websiteURL: window.location.href,
-              data: b && b.cData ? b.cData : null,
-              pagedata: b && b.chlPageData ? b.chlPageData : null,
-              action: b && b.action ? b.action : null,
-              userAgent: navigator.userAgent || null
-            };
-            // expose for page.evaluate to pick up
-            try { window.__tsPayload = payload; } catch (e) {}
-            try { window.__tsCallback = b && b.callback ? b.callback : null; } catch (e) {}
-            // keep page behavior: call original render so UI still shows
-            try { return orig(a, b); } catch(e) { /* ignore */ }
-            return 'hooked';
-          } catch (e) { return 'error'; }
-        };
-      }
-    } catch (e) { /* ignore injection errors */ }
-  }, 20);
+        // --- Continue to detail extraction ---
+        const detailOk = await pickAndOpenDetail(page, '');
 
-  // also expose a small nav helper so pickAndOpenDetail / other code can reuse it
-  try {
-    if (!window.__rtNavigate) {
-      window.__rtNavigate = async function (url) {
-        try { window.location.href = url; return true; } catch(e) { return false; }
-      };
+        if (!detailOk) {
+            console.warn('⚠️ Did not reach detail page, staying on results.');
+            // Try basic fallback immediately on results
+            const basic = await scrapeBasicResult(page);
+            console.log('🧩 Basic scrape from results:', basic);
+            await browser.close();
+            return { success: true, data: basic, reason: 'basic_only' };
+        }
+
+// Proceed only if detail page confirmed
+        await page.waitForTimeout(3000); // let content render
+
+// === Primary scrape ===
+        let detail = await scrapeWirelessDetail(page);
+
+// === Fallback scrape if detail empty ===
+        if (
+            !detail ||
+            ((!detail.mobile_phones?.length) && (!detail.phones?.length) && (!detail.address))
+        ) {
+            console.log('⚙️ Wireless detail empty — running basic scrape as fallback...');
+            const basic = await scrapeBasicResult(page);
+            detail = { ...detail, ...basic };
+        }
+
+        if (
+            detail?.mobile_phones?.length ||
+            detail?.phones?.length ||
+            detail?.address ||
+            detail?.phone ||
+            detail?.email ||
+            detail?.physical_address
+        ) {
+            console.log('✅ Got contact info:', detail);
+            await browser.close();
+            return { success: true, data: detail };
+        }
+
+        console.warn('⚠️ No data found even after fallback.');
+        await browser.close();
+        return { success: false, reason: 'no_data' };
+
+    } catch (err) {
+        console.error('❌ Attempt error:', err.message || err);
+        try {
+            await browser?.close();
+        } catch {}
+        return { success: false, reason: 'exception', error: err.message };
     }
-  } catch (e) {}
-})();
-`;
-
-// add the init script to the context so it's present before any page JS runs
-        try {
-            await context.addInitScript(turnstileHook);
-        } catch (e) {
-            console.warn('addInitScript failed:', e && e.message ? e.message : e);
-        }
-
-        // Block new tabs/popups from being opened by JS (e.g. window.open)
-        await context.addInitScript(() => {
-            window.open = (...args) => {
-                console.warn('⚠️ Blocked window.open attempt:', args);
-                return null;
-            };
-        });
-        await context.addInitScript(() => {
-            const observer = new MutationObserver(() => {
-                try {
-                    const pressDiv = [...document.querySelectorAll('div')]
-                        .find(d => /Press\s*&?\s*Hold/i.test(d.textContent || ''));
-                    const pressBtn =
-                        pressDiv && pressDiv.querySelector('button, div[role="button"]');
-
-                    if (pressBtn && !window.__pressHoldClicked) {
-                        window.__pressHoldClicked = true;
-                        console.log('🧩 Auto-pressing Cloudflare Press & Hold button…');
-                        pressBtn.dispatchEvent(
-                            new MouseEvent('mousedown', { bubbles: true, cancelable: true })
-                        );
-                        setTimeout(() => {
-                            pressBtn.dispatchEvent(
-                                new MouseEvent('mouseup', { bubbles: true, cancelable: true })
-                            );
-                        }, 5500); // Hold for ~5.5 s like a real human
-                    }
-                } catch (_) {}
-            });
-
-            observer.observe(document, { childList: true, subtree: true });
-        });
-// now create/open page and navigate
-        console.log('Navigating to target (with pre-injected Turnstile hook)...');
-        const page = await context.newPage();
-
-// Use a slightly stronger wait strategy: try networkidle first (if it completes quickly),
-// but fall back to domcontentloaded to avoid long stalls.
-        try {
-            await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        } catch (e) {
-            console.warn('domcontentloaded goto failed (falling back to domcontentloaded):', e?.message || e);
-            try {
-                await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 30000 });
-            } catch (err) {
-                console.warn('domcontentloaded goto also had an error (continuing):', err?.message || err);
-            }
-        }
-
-// ---------- SMART WAIT FOR PAGE RENDER ----------
-        try {
-            await Promise.race([
-                page.waitForSelector('.panel-body', { timeout: 10000 }), // FTN results panel
-                page.waitForSelector('iframe[src*="captcha"], iframe[src*="turnstile"], div[data-sitekey]', { timeout: 10000 }) // Cloudflare challenge
-            ]);
-            console.log('✅ Results or Turnstile detected — continuing...');
-        } catch {
-            console.warn('⚠️ Neither results nor Turnstile detected within 10s — continuing anyway...');
-        }
-
-// Give the page an extra 3 seconds for FTN JS to finish rendering
-        await page.waitForTimeout(3000);
-
-// Capture partial body for debugging
-        const htmlSnippet = await page.evaluate(() => document.body.innerText.slice(0, 400));
-        console.log('🧩 BODY SNIPPET:\n', htmlSnippet);
-        // 🔍 Try to follow the "View Details" link
-        const ridLink = await page.evaluate(() => {
-            const link = document.querySelector('a[href*="/search/people/results?rid="]');
-            return link ? link.href : null;
-        });
-
-        // after we find and goto the ridLink
-        if (ridLink) {
-            console.log('➡️ Found RID link:', ridLink);
-            await page.goto(ridLink, { waitUntil: 'domcontentloaded', timeout: 30000 });
-            await page.waitForSelector('.panel-body', { timeout: 8000 });
-
-            // instead of manually $$eval() here, call the real parser:
-            const detail = await scrapeWirelessDetail(page);
-            console.log('📞 Wireless Detail Extracted:', JSON.stringify(detail, null, 2));
-        }
-        else {
-            console.warn('⚠️ No RID link detected.');
-        }
-
-
-// ---------- IMMEDIATE RID NAVIGATION SNIPPET ----------
-        console.log('Trying immediate RID navigation (top-level + frames) and hard-stubbing window.open...');
-
-
-        const forcedNav = await page.evaluate(async () => {
-            try {
-                // prevent new tabs/windows from being opened by page scripts
-                try {
-                    window.open = function () {
-                        return null;
-                    };
-                    // also catch hyperlink targets that try to open new windows
-                    const origCreateElement = document.createElement;
-                    // don't override further if env is hostile — keep minimal
-                } catch (e) {
-                }
-
-                function findRidInDoc(doc) {
-                    try {
-                        // prefer absolute href on anchor nodes
-                        const a = doc.querySelector('a[href*="rid="]');
-                        if (a && a.href) return a.href;
-                        // sometimes links are in buttons with data-href
-                        const b = doc.querySelector('[data-href*="rid="], [href*="rid="]');
-                        if (b) {
-                            return b.getAttribute('href') || b.getAttribute('data-href') || null;
-                        }
-                        return null;
-                    } catch (e) {
-                        return null;
-                    }
-                }
-
-                // 1) top-level
-                let url = findRidInDoc(document);
-                if (url) return url;
-
-                // 2) quick scan of iframes (try to access top-level frames first)
-                for (const fr of Array.from(window.frames || [])) {
-                    try {
-                        const fd = fr.document || (fr.contentDocument ? fr.contentDocument : null);
-                        if (fd) {
-                            const found = findRidInDoc(fd);
-                            if (found) return (new URL(found, location.href)).toString();
-                        }
-                    } catch (e) {
-                        // cross-origin frames will throw — ignore
-                    }
-                }
-
-                // 3) scan all iframe elements and try safe access
-                for (const iframe of Array.from(document.querySelectorAll('iframe'))) {
-                    try {
-                        const idoc = iframe.contentDocument;
-                        if (idoc) {
-                            const found = findRidInDoc(idoc);
-                            if (found) return (new URL(found, location.href)).toString();
-                        }
-                    } catch (e) { /* ignore cross-origin frames */
-                    }
-                }
-
-                return null;
-            } catch (err) {
-                return null;
-            }
-        });
-
-// If we found a rid URL, navigate to it immediately (location.href so it's consistent)
-        if (forcedNav) {
-            console.log('Found RID link — forcing navigation to:', forcedNav);
-            try {
-                console.log('Navigating directly to RID URL:', forcedNav);
-
-                // navigate via JS
-                await page.evaluate(u => (window.location.href = u), forcedNav).catch(() => {});
-                // wait explicitly for navigation to settle
-                await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
-                await page.waitForTimeout(2000); // small buffer for scripts/images to load
-
-                // ✅ check for phone data once page is stable
-                const hasPhones = await page.$('div.panel-body, .phones, a[href*="phoneno="]');
-                if (hasPhones) {
-                    console.log('✅ Detected phone data already visible — skipping Turnstile and solver phase.');
-
-                    const scraped = await scrapeWirelessDetail(page).catch(err => {
-                        console.warn('scrapeWirelessDetail failed:', err.message);
-                        return {mobile_phones: [], phones: []};
-                    });
-
-                    console.log('📞 Parsed wireless detail immediately:', scraped);
-
-                    // save artifacts & close
-                    const hasData =
-                        (scraped.mobile_phones && scraped.mobile_phones.length > 0) ||
-                        (scraped.phones && scraped.phones.length > 0) ||
-                        scraped.address;
-
-                    if (hasData) {
-                        console.log('🎯 Success — valid data found, returning to parent function.');
-
-                        const shot = path.join(LOG_DIR, `phones-visible-${Date.now()}.png`);
-                        await page.screenshot({path: shot, fullPage: true}).catch(() => {
-                        });
-                        const statePath = path.join(LOG_DIR, `state-visible-${Date.now()}.json`);
-                        await context.storageState({path: statePath}).catch(() => {
-                        });
-
-
-                        try {
-                            await page?.close();
-                        } catch {
-                        }
-                        try {
-                            await context?.close();
-                        } catch {
-                        }
-                        try {
-                            await browser?.close();
-                        } catch {
-                        }
-
-                        // ✅ Return full structured object to parent
-                        return {
-                            success: true,
-                            reason: 'scraped_ok',
-                            proxyUsed: proxy.host,
-                            data: scraped,
-                            screenshot: shot,
-                            state: statePath
-                        };
-                    }
-                }
-
-            } catch (e) {
-                console.warn('Forced navigation attempt failed:', e && e.message ? e.message : e);
-            }
-
-        } else {
-            console.log('No RID link found on initial scan.');
-        }
-
-// short pause to give in-page scripts a chance to execute / redirect complete
-        await page.waitForTimeout(1200);
-
-// Wait for a Turnstile-like iframe (if any) to appear — many Cloudflare flows put the widget in an iframe.
-// Don't fail if it doesn't appear; just continue after the timeout.
-        try {
-            await page.waitForSelector('iframe[src*="turnstile"], iframe[src*="challenge"], iframe[src*="cloudflare"]', {timeout: 10000});
-            console.log('Turnstile-like iframe appeared (or at least an iframe matched the selector).');
-        } catch (e) {
-            console.log('No obvious Turnstile iframe found within timeout; will still attempt to read payload from frames.');
-        }
-
-// Helper: attempt to read __tsPayload; robust to navigation/context-destroyed by retrying a few times
-        async function readPayloadFromFrames(retries = 3, delayMs = 500) {
-            for (let attempt = 1; attempt <= retries; attempt++) {
-                try {
-                    // First, try top-level frame
-                    const top = await page.evaluate(() => {
-                        try {
-                            return window.__tsPayload || null;
-                        } catch (e) {
-                            return null;
-                        }
-                    });
-                    if (top) return top;
-
-                    // If nothing in top, check child frames
-                    const frames = page.frames();
-                    for (const f of frames) {
-                        try {
-                            const p = await f.evaluate(() => {
-                                try {
-                                    return window.__tsPayload || null;
-                                } catch (e) {
-                                    return null;
-                                }
-                            });
-                            if (p) return p;
-                        } catch (frameErr) {
-                            // frame might be navigating/blocked; ignore and continue
-                        }
-                    }
-
-                    // not found this attempt
-                    if (attempt < retries) await page.waitForTimeout(delayMs);
-                } catch (err) {
-                    // Typical error: "Execution context was destroyed" when a navigation happened.
-                    const msg = err && err.message ? err.message : String(err);
-                    console.warn(`readPayloadFromFrames attempt ${attempt} failed: ${msg}`);
-                    if (attempt < retries) {
-                        await page.waitForTimeout(delayMs);
-                        continue;
-                    } else {
-                        return null;
-                    }
-                }
-            }
-            return null;
-        }
-
-// Try reading payload with retries (covers mid-navigation race conditions)
-        const payload = await readPayloadFromFrames(6, 500);
-
-        if (!payload) {
-            console.warn('No Turnstile payload captured (could be in iframe or Cloudflare used different flow).');
-            // save screenshot + storage to help debugging
-            try {
-                const shotPath = path.join(LOG_DIR, `no-payload-${Date.now()}.png`);
-                await page.screenshot({path: shotPath, fullPage: true}).catch(() => {
-                });
-                const statePath = path.join(LOG_DIR, `no-payload-state-${Date.now()}.json`);
-                await context.storageState({path: statePath}).catch(() => {
-                });
-                console.log('Saved artifacts for inspection:', shotPath, statePath);
-            } catch (e) { /* ignore */
-            }
-        } else {
-            console.log('Captured Turnstile payload:', {
-                websiteKey: payload.websiteKey || payload.sitekey || null,
-                websiteURL: payload.websiteURL || payload.url || null,
-                action: payload.action || null,
-                userAgent: payload.userAgent ? String(payload.userAgent).slice(0, 80) : null
-            });
-        }
-
-
-// also capture a short snippet of body text for logging / heuristics
-        const bodyText = await page.evaluate(() => document.body ? document.body.innerText.slice(0, 2000) : '').catch(() => '');
-
-        if (!payload) {
-            console.warn('No Turnstile payload captured (could be in iframe or Cloudflare used different flow).');
-            // save screenshot + storage to help debugging
-            try {
-                const shotPath = path.join(LOG_DIR, `no-payload-${Date.now()}.png`);
-                await page.screenshot({path: shotPath, fullPage: true}).catch(() => {
-                });
-                const statePath = path.join(LOG_DIR, `no-payload-state-${Date.now()}.json`);
-                await context.storageState({path: statePath}).catch(() => {
-                });
-                console.log('Saved artifacts for inspection:', shotPath, statePath);
-            } catch (e) { /* ignore */
-            }
-        } else {
-            console.log('Captured Turnstile payload:', {
-                websiteKey: payload.websiteKey,
-                websiteURL: payload.websiteURL,
-                action: payload.action,
-                userAgent: payload.userAgent ? payload.userAgent.slice(0, 80) : null
-            });
-        }
-
-
-        if (!payload) {
-            console.warn('No Turnstile payload captured (could be in iframe or non-Turnstile challenge). Saving screenshot and storage for inspection.');
-            const s1 = path.join(LOG_DIR, `screenshot-no-payload-${Date.now()}.png`);
-            await page.screenshot({path: s1, fullPage: true}).catch(() => {
-            });
-            const statePath = path.join(LOG_DIR, `storage-no-payload-${Date.now()}.json`);
-            await context.storageState({path: statePath}).catch(() => {
-            });
-            console.log('Saved screenshot/state:', s1, statePath);
-            await context.close().catch(() => {
-            });
-            await browser.close().catch(() => {
-            });
-            return {success: false, reason: 'no_payload', probe, profileDir, screenshot: s1, state: statePath};
-        }
-
-        console.log('Turnstile sitekey detected:', payload.websiteKey);
-
-        // If 2captcha key is not set, bail to manual solve path
-        if (!TWO_KEY) {
-            console.warn('TWOCAPTCHA_API_KEY not set. Pausing for manual solve. Press ENTER in terminal when done.');
-            // leave browser open for manual solve
-            await new Promise((resolve) => {
-                process.stdin.resume();
-                process.stdin.once('data', () => {
-                    process.stdin.pause();
-                    resolve();
-                });
-            });
-            const s2 = path.join(LOG_DIR, `screenshot-manual-${Date.now()}.png`);
-            await page.screenshot({path: s2, fullPage: true}).catch(() => {
-            });
-            const statePath2 = path.join(LOG_DIR, `storage-manual-${Date.now()}.json`);
-            await context.storageState({path: statePath2}).catch(() => {
-            });
-            console.log('Saved after manual solve:', s2, statePath2);
-            if (!KEEP_OPEN) {
-                await context.close().catch(() => {
-                });
-                await browser.close().catch(() => {
-                });
-            }
-            return {success: true, manual: true, screenshot: s2, state: statePath2};
-        }
-
-        // prepare 2captcha solver and solver proxy string (matching browser exit IP ideally)
-        const solver = new Solver(TWO_KEY);
-        const solverProxyString = proxy.username ? (proxy.proto === 'socks5' ? `socks5://${proxy.username}:${proxy.password}@${proxy.host}:${proxy.port}` : `http://${proxy.username}:${proxy.password}@${proxy.host}:${proxy.port}`) : null;
-
-        // build tasks to try: prefer proxy-enabled TurnstileTask if we have solver proxy string
-        const variants = [];
-        if (solverProxyString) variants.push({
-            type: 'TurnstileTask',
-            websiteKey: payload.websiteKey,
-            websiteURL: payload.websiteURL,
-            proxy: solverProxyString
-        });
-        variants.push({type: 'TurnstileTaskProxyless', websiteKey: payload.websiteKey, websiteURL: payload.websiteURL});
-
-        let token = null, lastErr = null;
-        for (const v of variants) {
-            try {
-                console.log('Submitting to 2captcha with type:', v.type, v.proxy ? '(with proxy)' : '(proxyless)');
-                const res = await solver.solve(v);
-                // library often returns { data: '...' } or string
-                const t = res?.data || res?.token || (typeof res === 'string' ? res : null);
-                if (t) {
-                    token = t;
-                    break;
-                }
-            } catch (err) {
-                lastErr = err;
-                console.warn('Solver attempt failed:', err && err.message ? err.message : err);
-            }
-        }
-
-        if (!token) {
-            console.warn('Solver did not return a token. Saving artifacts and returning failure for this proxy.');
-            const s3 = path.join(LOG_DIR, `screenshot-solver-fail-${Date.now()}.png`);
-            await page.screenshot({path: s3, fullPage: true}).catch(() => {
-            });
-            const statePath3 = path.join(LOG_DIR, `storage-solver-fail-${Date.now()}.json`);
-            await context.storageState({path: statePath3}).catch(() => {
-            });
-            await context.close().catch(() => {
-            });
-            await browser.close().catch(() => {
-            });
-            return {
-                success: false,
-                reason: 'solver_failed',
-                error: lastErr && lastErr.message,
-                screenshot: s3,
-                state: statePath3
-            };
-        }
-
-        console.log('Token acquired (truncated):', String(token).slice(0, 30));
-
-        // inject token and call callback if present
-        await page.evaluate((token) => {
-            try {
-                const input = document.querySelector('input[name="cf-turnstile-response"], input[name="g-recaptcha-response"]');
-                if (input) input.value = token;
-
-                if (window.__tsCallback && typeof window.__tsCallback === 'function') {
-                    window.__tsCallback(token);
-                } else {
-                    // fallback: try triggering form
-                    const form = document.querySelector('form');
-                    if (form) {
-                        form.dispatchEvent(new Event('submit', {bubbles: true}));
-                    }
-                }
-            } catch (e) {
-            }
-        }, token);
-
-        // ✅ Extracted modifications only — insert into your existing script after token injection
-
-// wait a little to allow page to solve Turnstile
-        await page.waitForTimeout(4000);
-
-// dismiss cookie banner if it exists
-        await page.evaluate(() => {
-            const btn = [...document.querySelectorAll('button, div')].find(el =>
-                el.textContent?.trim().match(/accept|got it|okay|close/i)
-            );
-            if (btn) btn.click();
-        });
-
-// try to pick and navigate to a result
-        // Step: Auto-dismiss cookie banners
-        await page.evaluate(() => {
-            const btn = [...document.querySelectorAll('button, div')].find(el =>
-                el.textContent?.trim().match(/accept|got it|okay|close/i)
-            );
-            if (btn) btn.click();
-        });
-
-// Step: Try locating the rid= link and navigating directly
-        const ridUrl = await page.evaluate(() => {
-            try {
-                const link = document.querySelector('a[href*="rid="]');
-                if (link && link.href) {
-                    return new URL(link.getAttribute('href'), location.href).toString();
-                }
-            } catch (e) {
-            }
-            return null;
-        });
-
-        if (!ridUrl) {
-            console.warn('❌ Could not find RID result link — saving screenshot');
-            const shot = path.join(LOG_DIR, `no-rid-link-${Date.now()}.png`);
-            await page.screenshot({path: shot, fullPage: true}).catch(() => {
-            });
-        } else {
-            console.log('📍 Navigating directly to RID URL:', ridUrl);
-            await page.evaluate((u) => {
-                window.location.href = u;
-            }, ridUrl);
-            await page.waitForTimeout(5000); // let navigation finish
-
-            const scraped = await scrapeBasicResult(page).catch((e) => {
-                console.warn('scrape Basic view results page failed:', e?.message || e);
-                return {phone: null, email: null, physical_address: null};
-            });
-
-            console.log('Scraped detail:', scraped);
-
-            const finalShot = path.join(LOG_DIR, `final-scrape-${Date.now()}.png`);
-            await page.screenshot({path: finalShot, fullPage: true}).catch(() => {
-            });
-            const finalState = path.join(LOG_DIR, `final-state-${Date.now()}.json`);
-            await context.storageState({path: finalState}).catch(() => {
-            });
-            console.log('Saved final artifacts:', finalShot, finalState);
-        }
-
-
-        // wait and capture
-        // wait a little to allow navigation to clear CAPTCHA
-        await page.waitForTimeout(4000);
-        // auto-dismiss cookie banners or overlays
-        await page.evaluate(() => {
-            const btn = [...document.querySelectorAll('button, div')].find(el =>
-                el.textContent?.trim().match(/accept|got it|okay|close/i)
-            );
-            if (btn) btn.click();
-        });
-
-
-        try {
-            // wait briefly to ensure results are visible
-            await page.waitForTimeout(1200);
-
-            // define possible containers and link selectors
-            const resultsSelectors = [
-                'table tbody tr',
-                '.search-results .result',
-                '.results .result',
-                'ul.results > li',
-                '.people-results li',
-                '.content .result',
-            ];
-            const viewLinkSelectors = [
-                'a:has-text("View Details")',
-                'a:has-text("View")',
-                'a:has-text("Details")',
-                'a:has-text("Profile")',
-                'a[href*="/record/"]',
-                'a[href*="detail"]',
-                'a[href*="profile"]'
-            ];
-
-            let targetUrl = null;
-
-            // try finding a detail link from the first result row
-            for (const resSel of resultsSelectors) {
-                const row = page.locator(resSel).first();
-                if (await row.count()) {
-                    for (const linkSel of viewLinkSelectors) {
-                        const link = row.locator(linkSel).first();
-                        if (await link.count()) {
-                            const href = await link.getAttribute('href').catch(() => null);
-                            if (href) {
-                                targetUrl = new URL(href, await page.evaluate(() => location.href)).toString();
-                                break;
-                            }
-                        }
-                    }
-                }
-                if (targetUrl) break;
-            }
-
-            if (!targetUrl) {
-                console.warn('❌ Could not resolve View Details link — saving screenshot');
-                const shot = path.join(LOG_DIR, `no-details-link-${Date.now()}.png`);
-                await page.screenshot({path: shot, fullPage: true}).catch(() => {
-                });
-            } else {
-                console.log('🌐 Navigating via location.href to:', targetUrl);
-                await page.evaluate((u) => {
-                    window.location.href = u;
-                }, targetUrl);
-                await page.waitForTimeout(5000); // wait for navigation to complete
-
-                try {
-                    // prevent link auto-click chaos before scraping
-                    await page.evaluate(() => {
-                        document.querySelectorAll('a[href*="phoneno="]').forEach(a => {
-                            a.addEventListener('click', e => e.preventDefault());
-                        });
-                    });
-
-                    console.log('🔍 Extracting all phone data (wireless + landline)...');
-                    const scraped = await scrapeWirelessDetail(page).catch((e) => {
-                        console.warn('scrapeWirelessDetail failed:', e?.message || e);
-                        return { mobile_phones: [], phones: [] };
-                    });
-
-                    console.log('📞 Scraped phone data:', scraped);
-
-                    // Save screenshots and browser state for debugging
-                    const finalShot = path.join(LOG_DIR, `final-scrape-${Date.now()}.png`);
-                    await page.screenshot({ path: finalShot, fullPage: true }).catch(() => {});
-                    const finalState = path.join(LOG_DIR, `final-state-${Date.now()}.json`);
-                    await context.storageState({ path: finalState }).catch(() => {});
-                    console.log('💾 Saved final artifacts:', finalShot, finalState);
-
-                    // Return structured data (no external post)
-                    return {
-                        success: true,
-                        screenshot: finalShot,
-                        state: finalState,
-                        phones: scraped.phones,
-                        mobile_phones: scraped.mobile_phones,
-                    };
-                } catch (err) {
-                    console.error('Error in view-details + scrape phase:', err?.message || err);
-                    return { success: false, reason: 'scrape_error', error: err?.message };
-                } finally {
-                    if (!KEEP_OPEN) {
-                        try {
-                            await page?.close();
-                            await context?.close();
-                        } catch (e) {
-                            console.warn('⚠️ Close skipped (undefined page/context):', e.message);
-                        }
-
-                        await browser.close().catch(() => {});
-                    } else {
-                        console.log('KEEP_OPEN enabled - leaving browser open for inspection.');
-                    }
-                }
-
-
-                return {success: true, screenshot: s4, state: statePath4, resultPresent};
-            } // closes if (!targetUrl)
-
-
-// outer try/catch below remains untouched
-        } catch (err) {
-            console.error('Attempt error:', err && err.message ? err.message : err);
-            try {
-                if (page) {
-                    const errShot = path.join(LOG_DIR, `screenshot-error-${Date.now()}.png`);
-                    await page.screenshot({path: errShot}).catch(() => {
-                    });
-                }
-            } catch (e) {
-            }
-            try {
-                if (context) await context.close();
-            } catch (e) {
-            }
-            try {
-                if (browser) await browser.close();
-            } catch (e) {
-            }
-            return { success: false, reason: 'exception', error: err && err.message };
-            // closes outer catch
-        } }
-    catch (err) {
-        console.error('Attempt error:', err && err.message ? err.message : err);
-        try {
-            if (page) {
-                const errShot = path.join(LOG_DIR, `screenshot-error-${Date.now()}.png`);
-                await page.screenshot({ path: errShot }).catch(() => {});
-            }
-        } catch (e) {}
-        try {
-            if (context) await context.close();
-        } catch (e) {}
-        try {
-            if (browser) await browser.close();
-        } catch (e) {}
-
-        return { success: false, reason: 'exception', error: err && err.message };
-    } // closes outer catch
 }
 
 
