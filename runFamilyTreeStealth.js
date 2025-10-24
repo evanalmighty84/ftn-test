@@ -17,18 +17,15 @@ const path = require('path');
 const axios = require('axios');
 const { chromium } = require('playwright');
 const { Solver } = require('@2captcha/captcha-solver');
-
-const PROXY_FILE = process.env.PROXY_FILE || './proxies.txt';
-const RAW_PROXY = process.env.PROXY_LINE || null;
+const ONE_PROXY = process.env.ONE_PROXY;
+const PROXY_LIST_ENV = process.env.PROXY_LIST;
 const TWO_KEY = process.env.TWOCAPTCHA_API_KEY || '';
 const KEEP_OPEN = process.env.KEEP_BROWSER_OPEN === '1' || false;
 const MAX_TRIES = Number(process.env.MAX_TRIES || 6);
 const LOG_DIR = path.resolve(process.cwd(), 'ftn_debug');
 const UA = process.env.USER_AGENT || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
 
-async function ensureLogDir() {
-    try { await fsp.mkdir(LOG_DIR, { recursive: true }); } catch (e) {}
-}
+
 
 // simple parse that accepts common forms from your dashboard
 function normalizeProxy(raw) {
@@ -53,9 +50,6 @@ function normalizeProxy(raw) {
     if (m) return { proto: 'http', host: m[1], port: Number(m[2]) };
     throw new Error('Unrecognized proxy format: ' + raw);
 }
-
-
-
 
 async function pickAndOpenDetail(page, state) {
     const candidates = [
@@ -254,50 +248,7 @@ async function scrapeWirelessDetail(page) {
 
 
 
-async function loadProxyLines() {
-    const RAW_PROXY = process.env.RAW_PROXY;
-    const PROXY_FILE_ENV = process.env.PROXY_FILE;
-    const PROXY_LIST_ENV = process.env.PROXY_LIST;
 
-    // ✅ Priority 1: explicit single RAW_PROXY line
-    if (RAW_PROXY) return [RAW_PROXY.trim()];
-
-    // ✅ Priority 2: multi-line PROXY_LIST env var
-    if (PROXY_LIST_ENV) {
-        return PROXY_LIST_ENV
-            .split(/\r?\n|[|,]+|\s+(?=http)/)   // support pipes, commas, newlines, or spaces before "http"
-            .map(s => s.trim())
-            .filter(Boolean);
-    }
-
-
-    // ✅ Priority 3: load from file path (absolute or local)
-    // Detect local vs Railway
-    const isRailway = !!process.env.RAILWAY_ENVIRONMENT;
-    const defaultPath = isRailway
-        ? '/app/proxies.txt'
-        : path.resolve('./proxies.txt');
-
-    const proxyPath = PROXY_FILE_ENV
-        ? path.resolve(PROXY_FILE_ENV)
-        : defaultPath;
-
-    try {
-        if (fs.existsSync(proxyPath)) {
-            const txt = await fsp.readFile(proxyPath, 'utf8');
-            return txt
-                .split(/\r?\n/)
-                .map(s => s.trim())
-                .filter(Boolean);
-        } else {
-            console.warn(`⚠️ Proxy file not found at ${proxyPath}`);
-            return [];
-        }
-    } catch (e) {
-        console.warn(`⚠️ Could not read proxy file at ${proxyPath}:`, e.message);
-        return [];
-    }
-}
 
 async function probeExitIp(proxy) {
     try {
@@ -409,11 +360,27 @@ async function attemptWithProxy(rawProxy, tryIndex,target) {
         if (proxyForPlaywright) baseLaunchOpts.proxy = proxyForPlaywright;
 
         const opts = useChrome ? { ...baseLaunchOpts, channel: 'chrome' } : baseLaunchOpts;
-        const profileDir2 = path.resolve(
-            `./ftn-profile-${Date.now()}-${Math.floor(Math.random() * 10000)}`
-        );
 
-        context = await chromium.launchPersistentContext(profileDir2, opts);
+
+        const browser = await chromium.launch({
+            headless: false, // non-headless because Railway uses Xvfb
+            channel: 'chrome',
+            args: [
+                '--no-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-setuid-sandbox',
+                '--disable-blink-features=AutomationControlled',
+                '--use-gl=swiftshader',
+                '--disable-software-rasterizer',
+                '--window-size=1366,768',
+            ],
+        });
+
+        const context = await browser.newContext();
+
+
+
+
 
         console.log(
             `✅ Chromium launched (${useChrome ? 'chrome channel' : 'default'}) in headless mode.`
@@ -479,7 +446,31 @@ async function attemptWithProxy(rawProxy, tryIndex,target) {
                 return null;
             };
         });
+        await context.addInitScript(() => {
+            const observer = new MutationObserver(() => {
+                try {
+                    const pressDiv = [...document.querySelectorAll('div')]
+                        .find(d => /Press\s*&?\s*Hold/i.test(d.textContent || ''));
+                    const pressBtn =
+                        pressDiv && pressDiv.querySelector('button, div[role="button"]');
 
+                    if (pressBtn && !window.__pressHoldClicked) {
+                        window.__pressHoldClicked = true;
+                        console.log('🧩 Auto-pressing Cloudflare Press & Hold button…');
+                        pressBtn.dispatchEvent(
+                            new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+                        );
+                        setTimeout(() => {
+                            pressBtn.dispatchEvent(
+                                new MouseEvent('mouseup', { bubbles: true, cancelable: true })
+                            );
+                        }, 5500); // Hold for ~5.5 s like a real human
+                    }
+                } catch (_) {}
+            });
+
+            observer.observe(document, { childList: true, subtree: true });
+        });
 // now create/open page and navigate
         console.log('Navigating to target (with pre-injected Turnstile hook)...');
         const page = await context.newPage();
@@ -1139,21 +1130,52 @@ async function attemptWithProxy(rawProxy, tryIndex,target) {
 // 🧩 Exportable Runner
 // ============================================================
 
-async function runFamilyTreeStealth({ first, last, city } = {}) {
-    await ensureLogDir();
-    const lines = await loadProxyLines();
+async function runFamilyTreeStealth({ first = '', last =  '', city = '' } = {}) {
 
-    if (!lines.length && !RAW_PROXY) {
-        console.warn('No proxies found in PROXY_FILE and no PROXY_LINE provided. Exiting.');
-        return { ok: false, reason: 'no_proxies' };
-    }
 
     if (!first || !last || !city) {
         console.error('Missing required parameters for runFamilyTreeStealth:', { first, last, city });
         return { ok: false, reason: 'missing_params' };
     }
 
-    const pool = lines.length ? lines : [RAW_PROXY];
+    async function loadProxyLines() {
+        // ✅ Priority 1: explicit single ONE_PROXY line
+        if (ONE_PROXY) {
+            console.log('🌐 Using explicit ONE_PROXY.');
+            return [ONE_PROXY.trim()];
+        }
+
+        // ✅ Priority 2: multi-line PROXY_LIST env var
+        if (PROXY_LIST_ENV) {
+            const list = PROXY_LIST_ENV
+                .split(/\r?\n|[|,]+|\s+(?=http)/) // supports pipes, commas, or newlines
+                .map(s => s.trim())
+                .filter(Boolean);
+
+            if (list.length) {
+                console.log(`🌐 Loaded ${list.length} proxies from PROXY_LIST env.`);
+                return list;
+            }
+        }
+
+        // ✅ Priority 3: default Plano fallback
+        console.warn('⚠️ No proxies found — defaulting to Plano proxy.');
+        const DEFAULT_PLANO_PROXY =
+            'http://u740e583c56c805ce-zone-custom-region-us-st-texas-city-plano-session-default:u740e583c56c805ce@170.106.118.114:2333';
+
+        return [DEFAULT_PLANO_PROXY];
+    }
+
+    const lines = await loadProxyLines();
+
+    if (!lines.length && !ONE_PROXY) {
+        console.warn('No proxies found in PROXY_List and no ONE_PROXY provided. Exiting.');
+        return { ok: false, reason: 'no_proxies' };
+    }
+
+
+
+    const pool = lines.length ? lines : [ONE_PROXY];
 
     // 🎯 Build dynamic FTN URL for the given person
     const target = `https://www.familytreenow.com/search/genealogy/results?first=${encodeURIComponent(first)}&last=${encodeURIComponent(last)}&citystatezip=${encodeURIComponent(city)},+CA`;
@@ -1162,11 +1184,11 @@ async function runFamilyTreeStealth({ first, last, city } = {}) {
 
     // 🔁 Rotate proxies and attempt scraping
     for (let i = 0, tries = 0; tries < MAX_TRIES && i < pool.length; i = (i + 1) % pool.length, tries++) {
-        const raw = pool[i];
+        const proxy = pool[i];
         console.log(`\n== Try ${tries + 1} of up to ${MAX_TRIES} using proxy index ${i} ==`);
 
         // 🧠 Pass the target directly
-        const res = await attemptWithProxy(raw, tries + 1, target);
+        const res = await attemptWithProxy(proxy, tries + 1, target);
 
         if (res.success) {
             console.log('✅ Success!', res);
@@ -1194,29 +1216,13 @@ async function runFamilyTreeStealth({ first, last, city } = {}) {
 
     console.error('All attempts exhausted or max tries reached. Check logs under', LOG_DIR);
     return { ok: false, reason: 'exhausted' };
-}
 
 
-// ------------------------------------------------------------
-// 🧱 Dual-mode export / CLI
-// ------------------------------------------------------------
-if (require.main === module) {
-    const [,, first, last, city] = process.argv;
 
-    if (!first || !last || !city) {
-        console.error('Usage: node runFamilyTreeStealth.js <first> <last> <city>');
-        process.exit(1);
-    }
 
-    runFamilyTreeStealth({ first, last, city })
-        .then((r) => {
-            console.log('Final result:', r);
-            process.exit(r.success ? 0 : 1);
-        })
-        .catch((err) => {
-            console.error('Fatal error:', err);
-            process.exit(1);
-        });
+
+
+
 }
 
 module.exports = { runFamilyTreeStealth };

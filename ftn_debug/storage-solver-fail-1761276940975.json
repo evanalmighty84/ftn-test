@@ -1,0 +1,14 @@
+{
+  "cookies": [],
+  "origins": [
+    {
+      "origin": "https://challenges.cloudflare.com",
+      "localStorage": [
+        {
+          "name": "cf.turnstile.u",
+          "value": "3089Htjukjh2fmzm1Si.OiWcz33iGpsb.EyVoT_lB2Q-1761276933-1.3.1.1-0o1jMOhGZL_lA8BV45fr9vyZAOKcCWj1eQH85n7SJiiEl2mtlPu.eKSXaB7bRmIX7AJX3yszO12OUcSThh04yw"
+        }
+      ]
+    }
+  ]
+}

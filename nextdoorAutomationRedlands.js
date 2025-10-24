@@ -87,6 +87,23 @@ async function waitForFeed(page, totalMs = 90_000) {
     return false;
 }
 
+async function autoScroll(page) {
+    await page.evaluate(async () => {
+        await new Promise((resolve) => {
+            let totalHeight = 0;
+            const distance = 600;
+            const timer = setInterval(() => {
+                const scrollHeight = document.body.scrollHeight;
+                window.scrollBy(0, distance);
+                totalHeight += distance;
+                if (totalHeight >= scrollHeight - window.innerHeight) {
+                    clearInterval(timer);
+                    resolve();
+                }
+            }, 300);
+        });
+    });
+}
 
 
 
@@ -771,14 +788,198 @@ const runNextdoorAutomation = async () => {
                 continue;
             }
 
-            for (const [i, lead] of newLeads.entries()) {
-                console.log(`(${i + 1}/${newLeads.length}) Visiting -> ${lead.url}`);
+            await page.waitForTimeout(2500);
+            await autoScroll(page);
+            await page.waitForSelector('a[href^="/p/"]', { timeout: 8000 }).catch(() =>
+                console.warn('⚠️ No /p/ links appeared before timeout.')
+            );
 
-                const { author, location, description } = await getAuthorAndLocationAndDescription(page, lead.url);
-                lead.author = author;
-                lead.location = location;
+
+            const url = page.url();
+            if (/\/p\//.test(url)) {
+                console.warn('⚠️ We landed on a single post detail page, re-navigating back to feed...');
+                await page.goBack({ waitUntil: 'domcontentloaded' });
+                await page.waitForTimeout(2000);
+            }
+
+// --- 🧠 Adaptive Feed Discovery + Extraction (2025-compatible) ---
+
+// ✅ Early skip if no results found
+            const noResults = await page.$('text="No posts match"');
+            if (noResults) {
+                console.warn(`⚠️ No posts found for ${label}, skipping...`);
+                continue;
+            }
+
+            let cards = [];
+
+// 1️⃣ Legacy selector coverage (older React feed)
+            const legacySelectors = [
+                'div[data-testid="post-card"]',
+                'div[data-testid="feed-card"]',
+                'article[data-testid="post"]',
+                'div[data-testid="post-container"]',
+                'section[data-testid="post-card"]',
+                'div.cee-media-body',
+                'div[class*="PostContainer"]',
+                'div[class*="FeedCard"]',
+                'section[class*="PostCard"]'
+            ];
+
+            for (const sel of legacySelectors) {
+                cards = await page.$$(sel);
+                if (cards.length) {
+                    console.log(`✅ Found ${cards.length} legacy cards using: ${sel}`);
+                    break;
+                }
+            }
+
+// 2️⃣ Modern 2025 layout fallback (Nextdoor search/posts pages)
+            if (!cards.length) {
+                const anchors = await page.$$('a[href^="/p/"]');
+                const seen = new Set();
+
+                for (const anchor of anchors) {
+                    try {
+                        const card = await anchor.evaluateHandle((a) => {
+                            let el = a.parentElement;
+                            while (el && el.tagName !== 'BODY') {
+                                const s = window.getComputedStyle(el);
+                                if (s.display.includes('flex') && el.offsetHeight > 100 && el.offsetWidth > 200) return el;
+                                el = el.parentElement;
+                            }
+                            return null;
+                        });
+                        if (card) {
+                            const key = await card.evaluate(el => el.outerHTML.slice(0, 200));
+                            if (!seen.has(key)) {
+                                seen.add(key);
+                                cards.push(card);
+                            }
+                        }
+                    } catch {}
+                }
+
+                if (cards.length) console.log(`✅ Found ${cards.length} modern cards via /p/ link parent detection`);
+            }
+
+// 3️⃣ Scroll & retry once if still empty
+            if (!cards.length) {
+                console.warn('⚠️ No cards found — scrolling and retrying...');
+                await page.evaluate(() => window.scrollBy(0, window.innerHeight * 3));
+                await page.waitForTimeout(3000);
+
+                const anchors = await page.$$('a[href^="/p/"]');
+                for (const anchor of anchors) {
+                    const card = await anchor.evaluateHandle((a) => a.closest('div'));
+                    if (card) cards.push(card);
+                }
+                if (cards.length) console.log(`✅ Found ${cards.length} after scroll retry.`);
+            }
+
+// 4️⃣ Fallback diagnostic
+            if (!cards.length) {
+                console.error('❌ Still no cards found after all attempts.');
+                await page.screenshot({ path: `no_cards_${label}.png`, fullPage: true });
+                console.log(`📸 Saved screenshot: no_cards_${label}.png`);
+                continue;
+            }
+
+// --- 🧱 Extract author, location, and description for each lead ---
+            for (const [i, lead] of newLeads.entries()) {
+                console.log(`(${i + 1}/${newLeads.length}) Extracting from feed...`);
+
+                // Match card by post ID
+                let card = null;
+                for (const c of cards) {
+                    try {
+                        const link = await c.$('a[href*="/p/"], a[href*="/posting/"]');
+                        const href = link ? await link.getAttribute('href') : null;
+                        if (href) {
+                            const feedId = href.match(/\/p\/([A-Za-z0-9_-]+)/)?.[1];
+                            const leadId = lead.url.match(/\/p\/([A-Za-z0-9_-]+)/)?.[1];
+                            if (
+                                feedId && leadId &&
+                                (feedId === leadId ||
+                                    lead.url.includes(feedId) ||
+                                    href.includes(leadId))
+                            )
+                            {
+                                card = c;
+                                break;
+                            }
+                        }
+                    } catch {}
+                }
+
+                if (!card) {
+                    console.warn(`⚠️ No feed match found for ${lead.url}`);
+                    try {
+                        const debugHrefs = await Promise.all(
+                            cards.slice(0, 5).map(async c => {
+                                const a = await c.$('a[href*="/p/"]');
+                                return a ? await a.getAttribute('href') : null;
+                            })
+                        );
+                        console.log('🔍 First few hrefs found in feed:', debugHrefs.filter(Boolean));
+                    } catch {}
+                    continue;
+                }
+
+                let author = 'UNKNOWN';
+                let location = 'UNKNOWN';
+                let description = 'UNKNOWN';
+
+                // 👤 AUTHOR (legacy + new)
+                try {
+                    const authorSel = [
+                        'a[href*="/profile/"][href*="feed_author"]',
+                        'a[href*="/profile/"]:not([aria-hidden="true"])',
+                        'span[data-testid="styled-text"]:not(:has(a))[style*="font-family: var(--nd-font-family-detailTitle)"]'
+                    ].join(', ');
+                    author = await card.$eval(authorSel, el => el.innerText.trim());
+                    console.log(`✅ Author: ${author}`);
+                } catch {
+                    console.warn('⚠️ Author not found.');
+                }
+
+                // 📍 LOCATION (legacy + new neighborhood span)
+                try {
+                    const locSel = [
+                        'a[href*="/neighborhood/"] span',
+                        'span[data-testid="styled-text"][style*="font-family: var(--nd-font-family-detail)"]:not(:has(a))'
+                    ].join(', ');
+                    location = await card.$eval(locSel, el => el.innerText.trim());
+                    location = location.replace(/\s*[·•]\s*\d+\s*(hr|hrs|hour|hours|d|days).*$/i, '').trim();
+                    console.log(`✅ Location: ${location}`);
+                } catch {
+                    console.warn('⚠️ Location not found.');
+                }
+
+                // 📝 DESCRIPTION (new + old)
+                try {
+                    const descSel = [
+                        'div[data-testid="post-body"]',
+                        'div[class*="PostBody"]',
+                        'div[class*="Styled_display"] span[data-testid="styled-text"]:not(:has(a))',
+                        'div:not(:has(a)) span[data-testid="styled-text"]',
+                        'div:not(:has(a))'
+                    ].join(', ');
+                    description = await card.$eval(descSel, el => el.innerText.trim());
+                    console.log(`✅ Description found (${description.slice(0, 60)}...)`);
+                } catch {
+                    console.warn('⚠️ Description extraction failed.');
+                }
+
+                // Normalize and assign
+                lead.author = author || 'UNKNOWN';
+                lead.location = location || 'UNKNOWN';
+                lead.description = description || 'UNKNOWN';
                 lead.leadType = type;
-                lead.description = description;
+
+                console.log(`👤 ${author} | 📍 ${location} | 📝 ${description.slice(0, 80)}`);
+
+
 
                 if (!isValidPersonName(author)) {
                     console.log(`⏭️ Skipping weak name "${author}" (needs a real last name)`);
