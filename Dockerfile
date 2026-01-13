@@ -53,14 +53,14 @@ RUN mkdir -p /app/ftn_debug && chmod 777 /app/ftn_debug
 ENV FTN_DEBUG_PATH=/app/ftn_debug
 
 # ------------------------------------------------------------
-# 🚀 Start command (Nextdoor Mckinney automation)
+# 🚀 Start command (Nextdoor Allen automation)
 # ------------------------------------------------------------
 CMD bash -c '\
   mkdir -p /app/ftn_debug && chmod 777 /app/ftn_debug && \
   if command -v xvfb-run >/dev/null 2>&1; then \
     echo "🖥️  Starting with xvfb-run (virtual display)..."; \
-    xvfb-run -a node nextdoorAutomationMckinney.js; \
+    xvfb-run -a node nextdoorAutomationWylie.js; \
   else \
     echo "⚙️  xvfb not available — running headless mode."; \
-    HEADLESS=1 node nextdoorAutomationMckinney.js; \
+    HEADLESS=1 node nextdoorAutomationWylie.js; \
   fi'

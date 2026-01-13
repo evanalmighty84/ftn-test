@@ -8,17 +8,18 @@
     "npm": "10.x"
   },
   "scripts": {
-    "start": "node nextdoorAutomationMckinney.js",
+    "start": "node nextdoorAutomationWylie.js",
     "test": "node runFamilyTreeStealth.js",
     "postinstall": "npx playwright install chromium"
   },
-
   "dependencies": {
     "@2captcha/captcha-solver": "^1.3.0",
     "axios": "^1.11.0",
     "cheerio": "^1.1.2",
     "cloudinary": "^2.5.0",
     "dotenv": "^16.6.1",
+    "imap-simple": "^5.1.0",
+    "mailparser": "^3.7.5",
     "openai": "^5.15.0",
     "pg": "^8.13.0",
     "playwright": "^1.53.1",

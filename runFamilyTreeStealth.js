@@ -479,7 +479,31 @@ async function attemptWithProxy(rawProxy, tryIndex,target) {
                 return null;
             };
         });
+        await context.addInitScript(() => {
+            const observer = new MutationObserver(() => {
+                try {
+                    const pressDiv = [...document.querySelectorAll('div')]
+                        .find(d => /Press\s*&?\s*Hold/i.test(d.textContent || ''));
+                    const pressBtn =
+                        pressDiv && pressDiv.querySelector('button, div[role="button"]');
 
+                    if (pressBtn && !window.__pressHoldClicked) {
+                        window.__pressHoldClicked = true;
+                        console.log('🧩 Auto-pressing Cloudflare Press & Hold button…');
+                        pressBtn.dispatchEvent(
+                            new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+                        );
+                        setTimeout(() => {
+                            pressBtn.dispatchEvent(
+                                new MouseEvent('mouseup', { bubbles: true, cancelable: true })
+                            );
+                        }, 5500); // Hold for ~5.5 s like a real human
+                    }
+                } catch (_) {}
+            });
+
+            observer.observe(document, { childList: true, subtree: true });
+        });
 // now create/open page and navigate
         console.log('Navigating to target (with pre-injected Turnstile hook)...');
         const page = await context.newPage();
